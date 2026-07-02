@@ -30,13 +30,17 @@ class Budget:
         self.used = 0
         self._lock = threading.Lock()
 
-    def spend(self, n: int = 1) -> None:
+    def spend(self, n: int = 1) -> int:
+        """Reserve n calls; returns the running total, atomically, so a log
+        entry can carry the exact budget position of its own call even when
+        researchers spend concurrently."""
         with self._lock:
             if self.used + n > self.ceiling:
                 raise BudgetExceeded(
                     f"global tool-call ceiling reached ({self.used}/{self.ceiling})"
                 )
             self.used += n
+            return self.used
 
     @property
     def remaining(self) -> int:
@@ -118,8 +122,9 @@ class ToolRegistry:
         auto-firing at the iteration cap); these are logged but cost no budget.
         """
         spec = self.get(name)
+        budget_position: int | None = None
         if self.budget is not None and not auto:
-            self.budget.spend()
+            budget_position = self.budget.spend()
         error: str | None = None
         result: Any = None
         try:
@@ -139,7 +144,7 @@ class ToolRegistry:
                 args=args.model_dump(mode="json"),
                 result_summary=_summarize(result) if error is None else None,
                 error=error,
-                budget_used=self.budget.used if self.budget else None,
+                budget_used=budget_position,
             )
 
 
