@@ -275,9 +275,43 @@ class Orchestrator:
     def _plan_with_confirmation(
         self, standalone_query: str, clarification: str
     ) -> CreateResearchPlanArgs:
-        # --confirm rendering of the Proceed/Edit gate arrives with the UX
-        # phase; without it the first plan is accepted as-is.
-        return self.planner.plan(standalone_query, clarification)
+        """P1 gate: with --confirm, render the plan via ask_user with
+        [Proceed]/[Edit]; Edit collects feedback and regenerates until Proceed.
+        Gate calls are code-fired (auto): they never spend research budget."""
+        plan = self.planner.plan(standalone_query, clarification)
+        if not self.confirm:
+            return plan
+        while True:
+            summary = "\n".join(
+                f"{i}. [{sq.id}] {sq.question} (done when: {sq.done_criteria})"
+                for i, sq in enumerate(plan.sub_questions, 1)
+            )
+            answer = self.registry.dispatch(
+                "ask_user",
+                AskUserArgs(
+                    question=(
+                        f"Research plan for: {plan.standalone_query}\n{summary}\n"
+                        "Proceed with this plan, or edit it?"
+                    ),
+                    options=["Proceed", "Edit"],
+                    allow_free_text=False,
+                ),
+                phase="P1", role="orchestrator", forced=True, auto=True,
+            )
+            if str(answer).strip().lower().startswith("proceed"):
+                return plan
+            feedback = self.registry.dispatch(
+                "ask_user",
+                AskUserArgs(
+                    question="Describe the changes you want to the plan:",
+                    options=[],
+                    allow_free_text=True,
+                ),
+                phase="P1", role="orchestrator", forced=True, auto=True,
+            )
+            self._phase("P1", "regenerating plan from feedback")
+            plan = self.planner.plan(standalone_query, clarification,
+                                     feedback=str(feedback))
 
     def _research_all(self, plan: CreateResearchPlanArgs) -> list[ResearchOutcome]:
         """P2 swarm: one Researcher per sub-question, run in parallel."""

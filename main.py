@@ -2,17 +2,32 @@
 
 Usage:
     python main.py "your question" --mode balanced [--confirm] [--out report.md]
+
+Prints phase-by-phase progress to stderr, the rendered report to stdout, and
+saves report.md plus runlog.jsonl.
 """
 from __future__ import annotations
 
 import argparse
 import sys
 
+from rich.console import Console
+
 from agents.orchestrator import HaltError, Orchestrator
 from config import load_config
 from llm.client import ForcedToolError, LLMError
 from tools.registry import BudgetExceeded
 from tools.web_search import SearchSetupError
+from ui.prompt import cli_ask_user
+
+PHASE_LABELS = {
+    "P0": "intake",
+    "P1": "decompose",
+    "P2": "swarm research",
+    "P3": "cross-check",
+    "P4": "verify",
+    "P5": "report",
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,9 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = load_config(args.config)
+    console = Console(stderr=True, highlight=False)
 
     def on_phase(phase: str, msg: str) -> None:
-        print(f"[{phase}] {msg}", file=sys.stderr)
+        label = PHASE_LABELS.get(phase, phase)
+        console.print(f"[bold cyan]{phase}[/bold cyan] [dim]{label}[/dim] — {msg}")
 
     try:
         orch = Orchestrator(
@@ -48,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
             out_path=args.out,
             runlog_path=args.runlog,
             confirm=args.confirm,
+            ask_user_fn=cli_ask_user if sys.stdin.isatty() else None,
             on_phase=on_phase,
         )
         result = orch.run(args.question, context=args.context)
@@ -65,10 +83,9 @@ def main(argv: list[str] | None = None) -> int:
         return 5
 
     print(result.markdown)
-    print(
-        f"Saved {result.report_path} and {result.runlog_path} "
-        f"({result.tool_calls_used} tool calls used).",
-        file=sys.stderr,
+    console.print(
+        f"[green]Saved[/green] {result.report_path} and {result.runlog_path} "
+        f"({result.tool_calls_used} tool calls used)."
     )
     return 0
 
