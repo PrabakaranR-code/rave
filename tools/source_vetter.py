@@ -53,7 +53,7 @@ def classify_source(url: str, title: str = "", text: str = "") -> SourceType:
         return SourceType.primary
     if "forum" in host or "forum" in path or "/thread" in path or "/t/" in path or "community." in host:
         return SourceType.forum
-    if "blog" in host or "/blog" in path or "substack" in host or "medium" in host:
+    if "blog" in host or "/blog" in path or "/posts/" in path or "newsletter" in host:
         return SourceType.blog
     if "research" in host or "/research" in path or "analyst" in lower_text[:400]:
         return SourceType.analyst
