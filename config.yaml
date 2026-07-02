@@ -1,0 +1,48 @@
+# RAVE configuration.
+# Works out of the box against a local Ollama server (OpenAI-compatible /v1).
+# Point base_url at any OpenAI-compatible endpoint, or set provider: anthropic.
+
+llm:
+  provider: openai            # openai | anthropic
+  base_url: http://localhost:11434/v1
+  api_key_env: RAVE_LLM_API_KEY   # name of env var holding the API key (optional for local servers)
+  timeout_seconds: 120
+  max_tokens: 4096
+  temperature: 0.2
+  models:
+    # Per-role routing: cheap/fast model for planner + researcher,
+    # strongest model for critic + writer. A single model everywhere is fine.
+    planner: local-model
+    researcher: local-model
+    critic: local-model
+    writer: local-model
+
+search:
+  # Backend selection: "metasearch" needs metasearch_url; "commercial" needs an
+  # API key in the named env var; "crawler" indexes a user-supplied domain list.
+  # If backend is "auto": metasearch_url if set, else commercial if key present,
+  # else exit with a setup hint.
+  backend: auto               # auto | metasearch | crawler | commercial
+  metasearch_url: ""          # e.g. http://localhost:8080 (self-hosted, keyless)
+  commercial:
+    endpoint: ""              # JSON search API endpoint
+    api_key_env: RAVE_SEARCH_API_KEY
+  crawler:
+    domains: []               # e.g. ["docs.example.com"]
+    index_dir: .rave_index
+    max_pages_per_domain: 50
+
+pipeline:
+  chunk_tokens: 400           # target chunk size (approx. tokens)
+  chunk_overlap: 50           # approx. token overlap between chunks
+  stale_months: 6             # staleness threshold for fast-moving topics
+  max_fetch_per_search: 5     # pages fetched per web_search call
+  embeddings:
+    provider: hash            # hash (built-in, no external calls) | local
+    base_url: ""              # OpenAI-compatible /v1 for provider: local
+    model: ""
+
+modes:
+  speed:    {researcher_iters: 2, critic_cycles: 0, tool_call_ceiling: 25}
+  balanced: {researcher_iters: 4, critic_cycles: 1, tool_call_ceiling: 60}
+  quality:  {researcher_iters: 8, critic_cycles: 3, tool_call_ceiling: 150}
