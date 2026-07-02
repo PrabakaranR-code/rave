@@ -19,7 +19,7 @@ from llm.schemas import (
     WriteReportArgs,
 )
 from tools.crosscheck import CrossCheckResult
-from tools.registry import ToolRegistry
+from tools.registry import BudgetExceeded, ToolRegistry
 from tools.source_vetter import classify_source
 
 
@@ -48,9 +48,17 @@ class Writer:
         )
         args = self._enforce_citations(args, checked)
         args.verification_log = verification  # dossier copy is authoritative
-        self.registry.dispatch(
-            "write_report", args, phase=self.PHASE, role=self.ROLE, forced=True
-        )
+        try:
+            self.registry.dispatch(
+                "write_report", args, phase=self.PHASE, role=self.ROLE, forced=True
+            )
+        except BudgetExceeded:
+            # The report is always written even after a hard budget stop; the
+            # auto flag records that this call was exempted from the ceiling.
+            self.registry.dispatch(
+                "write_report", args, phase=self.PHASE, role=self.ROLE,
+                forced=True, auto=True,
+            )
         return args
 
     # -- dossier --------------------------------------------------------------

@@ -52,20 +52,23 @@ def scripted_speed_run() -> ScriptedLLM:
             "next_action": "search the web",
             "expected_info": "sourced facts",
         }))
-        llm.enqueue("action", ("web_search", {"query": "city transit budget vote", "top_k": 2}))
+        llm.enqueue(f"action:{sq_id}",
+                    ("web_search", {"query": "city transit budget vote", "top_k": 2}))
         llm.enqueue("plan_preamble", ("plan_preamble", {
             "current_goal": f"bank evidence for {sq_id}",
             "next_action": "record findings and finish",
             "expected_info": "confirmation",
         }))
         llm.enqueue(
-            "action",
+            f"action:{sq_id}",
             ("record_findings", {"findings": [{
                 "claim": claim, "url": ARTICLE, "date": "2026-05-14",
                 "source_type": "news", "confidence": "M", "quote": quote,
             }]}),
             ("done", {"coverage_summary": f"{sq_id} answered from the article", "gaps": []}),
         )
+    # speed mode: the critic still audits once, report-only
+    llm.enqueue("critique_findings", ("critique_findings", {"issues": []}))
     llm.enqueue("write_report", ("write_report", {
         "title": "City transit budget: what was approved",
         "exec_summary": ["The council approved a 48 million dollar transit budget.",
@@ -134,8 +137,8 @@ def test_runlog_shows_every_phase_transition_as_forced_calls(run_result):
 
 def test_budget_accounting_in_runlog(run_result):
     result, _, _ = run_result
-    # classify + plan + 3x(2 preambles + search + record + done) + report = 18
-    assert result.tool_calls_used == 18
+    # classify + plan + 3x(2 preambles + search + record + done) + critique + report = 19
+    assert result.tool_calls_used == 19
     assert result.tool_calls_used <= 25  # speed ceiling
 
 

@@ -7,12 +7,14 @@ schema-validated tool calls dispatched here.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 import httpx
 
+from agents.critic import Critic, verify_issue
 from agents.planner import Planner
 from agents.researcher import Researcher, ResearchOutcome
 from agents.writer import Writer, render_markdown
@@ -31,7 +33,7 @@ from llm.schemas import (
     WebSearchArgs,
     WriteReportArgs,
 )
-from tools.crosscheck import CrossCheckResult, crosscheck
+from tools.crosscheck import CrossCheckResult, SubPassFindings, crosscheck
 from tools.fetch_page import Fetcher, FetchPageTool
 from tools.ranker import make_embedder
 from tools.registry import Budget, RunLog, ToolRegistry, ToolSpec
@@ -233,13 +235,16 @@ class Orchestrator:
             thin_subpasses=checked.thin_subpasses,
         )
 
-        self._phase("P4", "critic → verify loop")
-        checked, verification = self._critic_verify(plan, checked, outcomes)
-
-        self._phase("P5", "writing report")
         coverage_notes = [
             f"{o.subpass.sub_question_id}: {o.done.coverage_summary}" for o in outcomes
         ] + [g for o in outcomes for g in o.done.gaps]
+
+        self._phase("P4", "critic → verify loop")
+        checked, verification = self._critic_verify(
+            classification.standalone_question, checked, outcomes, coverage_notes
+        )
+
+        self._phase("P5", "writing report")
         report = self.writer.write(
             classification.standalone_question, checked, coverage_notes, verification
         )
@@ -275,18 +280,70 @@ class Orchestrator:
         return self.planner.plan(standalone_query, clarification)
 
     def _research_all(self, plan: CreateResearchPlanArgs) -> list[ResearchOutcome]:
-        outcomes = []
-        for sub_q in plan.sub_questions:
+        """P2 swarm: one Researcher per sub-question, run in parallel."""
+
+        def one(sub_q) -> ResearchOutcome:
             researcher = Researcher(self.client, self.registry, self.mode.researcher_iters)
-            outcomes.append(researcher.research(sub_q, plan.standalone_query))
-        return outcomes
+            return researcher.research(sub_q, plan.standalone_query)
+
+        async def gather():
+            return await asyncio.gather(
+                *(asyncio.to_thread(one, sq) for sq in plan.sub_questions)
+            )
+
+        return list(asyncio.run(gather()))
 
     def _critic_verify(
         self,
-        plan: CreateResearchPlanArgs,
+        standalone_query: str,
         checked: CrossCheckResult,
         outcomes: list[ResearchOutcome],
+        coverage_notes: list[str],
     ) -> tuple[CrossCheckResult, VerificationLog]:
-        # Full Critic → Verify loop lands in the full-engine phase; the happy
-        # path reports zero cycles.
-        return checked, VerificationLog(cycles_run=0, changes=[], unverified=[])
+        """P4: forced critique, then <=2 tool calls of code-driven verification
+        per issue, looping until the critic is clean or the cycle cap hits.
+
+        critic_cycles = 0 (speed): the critic still audits once, report-only —
+        its issues are surfaced as [unverified], with no re-search.
+        """
+        critic = Critic(self.client, self.registry)
+        subpasses: list[SubPassFindings] = [o.subpass for o in outcomes]
+        changes: list[str] = []
+        open_issues = []
+        cycles_run = 0
+
+        while True:
+            if self.budget.remaining < 1:
+                changes.append("verification stopped: global tool-call ceiling reached")
+                break
+            critique = critic.critique(
+                standalone_query, checked, coverage_notes, cycle=cycles_run + 1
+            )
+            open_issues = list(critique.issues)
+            if not open_issues:
+                break
+            if cycles_run >= self.mode.critic_cycles:
+                break  # cap reached: whatever is open stays open, reported below
+            cycles_run += 1
+            self._phase("P4", f"verify cycle {cycles_run}: {len(open_issues)} issue(s)")
+            for issue in open_issues:
+                outcome = verify_issue(issue, checked, self.registry)
+                changes.extend(outcome.notes)
+                if outcome.new_findings:
+                    subpasses.append(SubPassFindings(
+                        sub_question_id=f"vf-{issue.id}-c{cycles_run}",
+                        findings=outcome.new_findings,
+                    ))
+            checked = crosscheck(subpasses)
+
+        unverified = [
+            f"{i.type.value}: {i.claim_ref or i.instruction}" for i in open_issues
+        ]
+        verification = VerificationLog(
+            cycles_run=cycles_run, changes=changes, unverified=unverified
+        )
+        self.runlog.record(
+            event="verification", phase="P4",
+            cycles_run=cycles_run, changes=changes, unverified=unverified,
+        )
+        return checked, verification

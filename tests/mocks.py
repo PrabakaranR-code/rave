@@ -5,6 +5,7 @@ No network anywhere — both are httpx.MockTransport handlers.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -17,8 +18,11 @@ class ScriptedLLM:
     """Replays canned OpenAI-style tool-call responses.
 
     Responses are queued under a key: the tool's name for forced (single-tool)
-    calls, or "action" for multi-tool researcher turns. One queued item may
-    contain several tool calls (parallel calls in one assistant message).
+    calls, or "action" for multi-tool researcher turns. Researcher swarms run
+    in parallel, so action queues can also be scoped per sub-question with the
+    key "action:<sq_id>" — the handler routes on the "YOUR sub-question (sqN)"
+    marker in the conversation. One queued item may contain several tool calls
+    (parallel calls in one assistant message).
     """
 
     def __init__(self):
@@ -33,6 +37,14 @@ class ScriptedLLM:
         self.requests.append(payload)
         names = sorted(t["function"]["name"] for t in payload["tools"])
         key = names[0] if len(names) == 1 else "action"
+        if key == "action":
+            convo = "\n".join(
+                m["content"] for m in payload["messages"]
+                if isinstance(m.get("content"), str)
+            )
+            m = re.search(r"YOUR sub-question \((\w+)\)", convo)
+            if m and self.queues.get(f"action:{m.group(1)}"):
+                key = f"action:{m.group(1)}"
         if not self.queues[key]:
             raise AssertionError(f"no scripted LLM response left for key {key!r}")
         calls = self.queues[key].popleft()
@@ -72,6 +84,8 @@ def fake_site_transport() -> httpx.MockTransport:
                  "content": "council transit budget"},
                 {"url": "https://site.test/plain", "title": "Frogs",
                  "content": "glass frogs"},
+                {"url": "https://mirror.test/article", "title": "Budget vote (wire copy)",
+                 "content": "council transit budget"},
             ]})
         if path == "/":  # connectivity probes
             return httpx.Response(200, html="<p>ok</p>")
