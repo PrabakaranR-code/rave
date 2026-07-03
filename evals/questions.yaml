@@ -1,0 +1,44 @@
+# Benchmark questions for the eval harness. Each entry lists key facts a good
+# report is expected to surface; expected_facts are matched case-insensitively
+# against the rendered report.
+questions:
+  - id: q01
+    question: "What is the speed of light in a vacuum, in meters per second?"
+    mode: speed
+    expected_facts: ["299,792,458 OR 299792458"]
+  - id: q02
+    question: "What is the standard marathon race distance, and when was it fixed?"
+    mode: speed
+    expected_facts: ["42.195", "1921"]
+  - id: q03
+    question: "What is the boiling point of water at standard sea-level pressure?"
+    mode: speed
+    expected_facts: ["100", "212"]
+  - id: q04
+    question: "How does the European Union define a small or medium-sized enterprise?"
+    mode: balanced
+    expected_facts: ["250", "employees"]
+  - id: q05
+    question: "What is the current population of Japan, and is it growing or shrinking?"
+    mode: balanced
+    expected_facts: ["million", "shrink OR declin"]
+  - id: q06
+    question: "What is the current statutory minimum wage in the state of California?"
+    mode: balanced
+    expected_facts: ["per hour"]
+  - id: q07
+    question: "Which spacecraft are currently docked to the International Space Station?"
+    mode: balanced
+    expected_facts: ["docked"]
+  - id: q08
+    question: "What are the current policy interest rates set by the central bank of the United States?"
+    mode: balanced
+    expected_facts: ["percent OR %"]
+  - id: q09
+    question: "How tall is the tallest completed building in the world?"
+    mode: speed
+    expected_facts: ["828 OR 2,717"]
+  - id: q10
+    question: "What were the causes of the 1815 volcanic 'year without a summer'?"
+    mode: balanced
+    expected_facts: ["Tambora OR eruption", "1816"]
