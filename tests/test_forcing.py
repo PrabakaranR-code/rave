@@ -6,7 +6,7 @@ import json
 import httpx
 import pytest
 
-from config import LLMConfig, ModelRouting
+from config import LLMConfig
 from llm.client import ForcedToolError, LLMClient, LLMError, ToolDecl
 from llm.schemas import DoneArgs, PlanPreambleArgs, WebSearchArgs
 
@@ -40,19 +40,20 @@ def openai_tool_response(name: str, args: dict) -> dict:
     }
 
 
-def make_client(responses: list[dict], requests_out: list[dict], provider="openai") -> LLMClient:
-    """LLMClient over a mock transport that replays canned JSON responses."""
+def make_client(responses: list[dict], requests_out: list[dict], protocol="openai") -> LLMClient:
+    """LLMClient over a mock transport that replays canned JSON responses.
+
+    The wire protocol is chosen by base_url shape: an api.anthropic.com URL
+    speaks Anthropic, anything else OpenAI-compatible.
+    """
     it = iter(responses)
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests_out.append(json.loads(request.content))
         return httpx.Response(200, json=next(it))
 
-    cfg = LLMConfig(
-        provider=provider,
-        base_url="http://mock" + ("/v1" if provider == "openai" else ""),
-        models=ModelRouting(),
-    )
+    base = "https://api.anthropic.com" if protocol == "anthropic" else "http://mock/v1"
+    cfg = LLMConfig(mode="api", base_url=base, model="test-model")
     return LLMClient(cfg, transport=httpx.MockTransport(handler))
 
 
@@ -136,7 +137,7 @@ def test_anthropic_forcing_and_parsing():
             {"type": "tool_use", "id": "tu_1", "name": "plan_preamble", "input": VALID_PREAMBLE},
         ]
     }
-    client = make_client([resp], reqs, provider="anthropic")
+    client = make_client([resp], reqs, protocol="anthropic")
     out = client.forced_tool(
         "planner",
         PREAMBLE,
@@ -148,6 +149,21 @@ def test_anthropic_forcing_and_parsing():
     assert reqs[0]["system"] == "you are a planner"
     assert all(m["role"] != "system" for m in reqs[0]["messages"])
     assert reqs[0]["tools"][0]["input_schema"]["type"] == "object"
+
+
+def test_anthropic_base_url_with_v1_suffix_still_posts_to_v1_messages():
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        return httpx.Response(200, json={"content": [
+            {"type": "tool_use", "id": "t", "name": "plan_preamble", "input": VALID_PREAMBLE}
+        ]})
+
+    cfg = LLMConfig(mode="api", base_url="https://api.anthropic.com/v1", model="m")
+    client = LLMClient(cfg, transport=httpx.MockTransport(handler))
+    client.forced_tool("planner", PREAMBLE, [{"role": "user", "content": "go"}])
+    assert urls == ["https://api.anthropic.com/v1/messages"]
 
 
 def test_http_error_raises_llm_error():

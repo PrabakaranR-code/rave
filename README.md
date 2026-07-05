@@ -67,9 +67,11 @@ git clone <this-repo> && cd rave
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 
-# 1. an LLM endpoint — any OpenAI-compatible server works; for Ollama:
-#    ollama serve            (config.yaml already points at localhost:11434/v1)
-#    ollama pull <a tool-calling model>   # then set it in config.yaml → llm.models
+# 1. an LLM — local mode is keyless and defaults to Ollama's localhost:11434/v1:
+#    ollama serve
+#    ollama pull llama3.1:8b   # or qwen, deepseek-r1, ... — any tool-calling model
+#    then set config.yaml → llm.model to the model you pulled
+#    (hosted APIs work too: llm.mode: api + base_url + key; see docs/LIVE_RUN.md)
 
 # 2. a search backend — one of:
 #    * a self-hosted metasearch instance (keyless):
@@ -113,17 +115,13 @@ still written (that final call is logged with `auto: true`).
 
 ```yaml
 llm:
-  provider: openai            # openai (any compatible /v1) | anthropic
-  base_url: http://localhost:11434/v1
-  api_key_env: RAVE_LLM_API_KEY   # env var NAME holding the key (if needed)
+  mode: local                 # local (keyless) | api (key required)
+  base_url: ""                # local: empty = http://localhost:11434/v1
+  model: llama3.1:8b          # ONE model serves all four agent roles
+  api_key_env: RAVE_LLM_API_KEY   # api mode only: env var NAME holding the key
   timeout_seconds: 120
   max_tokens: 4096
   temperature: 0.2
-  models:                     # per-role routing; one model everywhere is fine
-    planner: local-model      # cheap/fast
-    researcher: local-model   # cheap/fast
-    critic: local-model       # strongest available
-    writer: local-model       # strongest available
 
 search:
   backend: auto               # auto | metasearch | crawler | commercial
@@ -154,6 +152,11 @@ modes:                        # override budgets if you must
 
 Backend auto-selection: `metasearch_url` if set, else `commercial` if its key
 is present, else exit with a setup hint.
+
+LLM protocol auto-detection: a `base_url` on `api.anthropic.com` speaks the
+Anthropic messages protocol; every other URL speaks OpenAI-compatible chat
+completions (OpenAI, DeepSeek, Moonshot/Kimi, Perplexity Sonar, LM Studio,
+Ollama, …). See `docs/LIVE_RUN.md` for copy-paste configs.
 
 ## The Finding schema (used everywhere, no exceptions)
 

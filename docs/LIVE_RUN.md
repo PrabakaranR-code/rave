@@ -4,44 +4,62 @@ RAVE only answers from live retrieval. A run needs exactly two things you
 provide: **an LLM endpoint** and **a search backend**. Without working web
 access it prints a HALT message and exits nonzero — by design.
 
-## 1. Provide an LLM endpoint
+## 1. Provide an LLM
 
-Pick one option and set it under `llm:` in `config.yaml`.
+One model serves all four agent roles. Two modes:
 
-### Option A — local Ollama (keyless; the default config shape)
+- **`mode: local`** — keyless; `base_url` defaults to
+  `http://localhost:11434/v1`, so a local Ollama server hosting any model
+  (llama, qwen, deepseek-r1, …) works out of the box.
+- **`mode: api`** — set `base_url` and export the key in the env var named by
+  `api_key_env`.
+
+The wire protocol is auto-detected from `base_url`: `api.anthropic.com`
+speaks the Anthropic messages protocol; every other URL speaks
+OpenAI-compatible chat completions.
+
+Four copy-paste examples for `llm:` in `config.yaml`:
+
+### Ollama, local (keyless)
 
 ```yaml
 llm:
-  provider: openai
-  base_url: http://localhost:11434/v1
-  models: {planner: llama3.1:8b, researcher: llama3.1:8b,
-           critic: llama3.1:8b, writer: llama3.1:8b}   # whatever model you pulled
+  mode: local
+  model: llama3.1:8b            # whatever you pulled: qwen3:8b, deepseek-r1:8b, ...
 ```
 
-### Option B — any hosted OpenAI-compatible endpoint
+### Anthropic
 
 ```yaml
 llm:
-  provider: openai
-  base_url: https://<your-endpoint>/v1
-  api_key_env: RAVE_LLM_API_KEY      # then: export RAVE_LLM_API_KEY=<key>
-  models: {planner: <model>, researcher: <model>, critic: <model>, writer: <model>}
-```
-
-### Option C — Anthropic API
-
-```yaml
-llm:
-  provider: anthropic
-  base_url: https://api.anthropic.com   # no /v1 suffix; the client adds /v1/messages
+  mode: api
+  base_url: https://api.anthropic.com   # with or without /v1 — both work
+  model: claude-sonnet-5
   api_key_env: RAVE_LLM_API_KEY         # export RAVE_LLM_API_KEY=sk-ant-...
-  models: {planner: claude-haiku-4-5-20251001, researcher: claude-haiku-4-5-20251001,
-           critic: claude-sonnet-5, writer: claude-sonnet-5}
 ```
 
-Per-role routing exists so you can put a cheap/fast model on planner and
-researcher and the strongest model on critic and writer. A single model
-everywhere works too.
+### OpenAI
+
+```yaml
+llm:
+  mode: api
+  base_url: https://api.openai.com/v1
+  model: <an OpenAI model with tool calling>
+  api_key_env: RAVE_LLM_API_KEY         # export RAVE_LLM_API_KEY=sk-...
+```
+
+### Any other OpenAI-compatible provider
+
+DeepSeek, Kimi/Moonshot, Perplexity Sonar, a remote LM Studio box — anything
+speaking the `/v1/chat/completions` protocol with tool calling:
+
+```yaml
+llm:
+  mode: api
+  base_url: https://api.deepseek.com/v1   # your provider's /v1 base
+  model: deepseek-chat                    # your provider's model id
+  api_key_env: RAVE_LLM_API_KEY           # export RAVE_LLM_API_KEY=<key>
+```
 
 ## 2. Provide a search backend
 
@@ -127,6 +145,6 @@ before the swarm starts.
 
 The exit-4 caveat matters for small local models: every phase transition is a
 forced, schema-validated tool call, retried at most twice before failing
-loudly. If an 8B model can't keep the schemas straight, point `critic` and
-`writer` (or all roles) at a stronger model — that is exactly what the
-per-role `llm.models` routing is for.
+loudly. If an 8B model can't keep the schemas straight, set `llm.model` to a
+stronger model (or switch `llm.mode: api` and point `base_url` at a hosted
+provider).
