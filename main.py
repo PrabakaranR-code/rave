@@ -1,15 +1,18 @@
 """CLI entry point.
 
 Usage:
+    python main.py                      # daily chat mode (friendly)
+    python main.py setup [...]          # setup wizard (add --expert to skip hand-holding)
     python main.py "your question" --mode balanced [--confirm] [--out report.md]
 
-Prints phase-by-phase progress to stderr, the rendered report to stdout, and
-saves report.md plus runlog.jsonl.
+Research runs print phase-by-phase progress to stderr, the rendered report to
+stdout, and save report.md plus runlog.jsonl.
 """
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from rich.console import Console
 
@@ -50,6 +53,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:]) if argv is None else list(argv)
+    from wizard.envfile import load_env
+
+    load_env(Path(__file__).resolve().parent / ".env")
+    if argv and argv[0] == "setup":
+        from wizard.wizard import run_setup
+
+        return run_setup(argv[1:])
+    if not argv:
+        from wizard.chat import run_chat
+
+        return run_chat()
+
     args = build_parser().parse_args(argv)
     cfg = load_config(args.config)
     console = Console(stderr=True, highlight=False)

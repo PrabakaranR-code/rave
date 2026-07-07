@@ -6,6 +6,45 @@ adversarial verification loop, and outputs a fully cited report with a source
 ledger and verification log. It runs locally against Ollama or any
 OpenAI-compatible / Anthropic-style API endpoint.
 
+## Install in one line
+
+First, open a terminal (the command window):
+
+- **Windows**: press the Windows key, type `powershell`, press Enter.
+- **Mac**: press Cmd+Space, type `terminal`, press Enter.
+- **Ubuntu**: press Ctrl+Alt+T.
+- **VPS / server**: you're already in a shell after `ssh`.
+
+Paste with Ctrl+V (Windows/Ubuntu) or Cmd+V (Mac) — on some terminals it's
+right-click — then press Enter.
+
+**Mac / Ubuntu / VPS:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/PrabakaranR-code/rave/main/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/PrabakaranR-code/rave/main/install.ps1 | iex
+```
+
+The installer checks your computer, fetches what's missing, and hands over to
+the setup wizard. The wizard asks a few numbered questions — where RAVE's
+thinking should happen (a local AI model, an online service with an API key
+(your access key), or a provider bundle that also connects RAVE into that
+company's AI apps), sets up web search (a private SearXNG search engine via
+Docker, or the built-in crawler), runs a test question, and finishes. You
+never type model names, addresses, or paths — you only pick numbers.
+
+Afterwards, daily use is just:
+
+```sh
+rave            # ask a question, pick a depth, get a cited report
+rave setup      # change settings any time
+```
+
 ## Hard principles
 
 1. **Grounding over recall.** Factual answers come only from live retrieval
@@ -88,9 +127,31 @@ Add `--confirm` to review/edit the research plan before the swarm runs.
 Outputs: the report on stdout and in `report.md`, plus `runlog.jsonl` — a
 JSONL trace of every tool call (phase, role, args, forced/auto flags, budget).
 
+## For technical users (the expert layer)
+
+Skip the hand-holding entirely:
+
+```sh
+rave setup --expert                 # compact checklist + config.yaml field docs
+rave setup --expert --mode api --provider anthropic \
+           --model claude-sonnet-4-6 --search metasearch   # non-interactive
+```
+
+`config.yaml` is fully inline-documented (fields: `mode local|api`,
+`base_url`, `model`, `api_key_env`, search backend); the API key lives in
+`.env` (chmod 600), never in config. Daily pipeline:
+
+```sh
+python main.py "question" --mode speed|balanced|quality [--confirm] [--out report.md]
+python mcp_server.py                # stdio tool server for MCP clients
+python mcp_server.py --http --port 8765   # HTTP mode for remote connectors
+```
+
 ## CLI
 
 ```
+python main.py                      # daily chat mode
+python main.py setup [--expert ...] # setup wizard
 python main.py "question" [--mode speed|balanced|quality] [--confirm]
                [--out report.md] [--runlog runlog.jsonl]
                [--config config.yaml] [--context "extra context"]
