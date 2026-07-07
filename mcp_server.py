@@ -103,5 +103,51 @@ def serve(stdin=None, stdout=None) -> None:
             stdout.flush()
 
 
+def serve_http(port: int, host: str = "0.0.0.0", runner=deep_research):
+    """Minimal HTTP front: POST a JSON-RPC request body to /, get the response.
+
+    Used by the setup wizard to expose deep_research to remote connectors
+    (behind a tunnel or on a VPS). Returns the server; call serve_forever().
+    """
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):  # quiet
+            pass
+
+        def _reply(self, code: int, payload: dict) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):  # health check for connector setup
+            self._reply(200, {"ok": True, "server": SERVER_INFO["name"]})
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                req = json.loads(self.rfile.read(length))
+            except json.JSONDecodeError:
+                self._reply(400, {"error": "invalid JSON"})
+                return
+            resp = handle_request(req, runner=runner)
+            self._reply(200, resp if resp is not None else {"ok": True})
+
+    return ThreadingHTTPServer((host, port), Handler)
+
+
 if __name__ == "__main__":
-    serve()
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--http", action="store_true",
+                        help="serve JSON-RPC over HTTP instead of stdio")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args()
+    if args.http:
+        serve_http(args.port).serve_forever()
+    else:
+        serve()

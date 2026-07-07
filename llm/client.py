@@ -1,7 +1,10 @@
 """LLM client with schema-enforced (forced) tool calling.
 
-Supports any OpenAI-compatible chat-completions endpoint (including a local
-Ollama server's /v1) plus an optional Anthropic-messages adapter.
+Speaks two wire protocols, auto-detected from the configured base_url:
+Anthropic messages for api.anthropic.com, OpenAI-compatible chat completions
+for everything else (local Ollama/LM Studio servers, OpenAI, DeepSeek,
+Moonshot, Perplexity, and other compatible providers). One model serves all
+agent roles.
 
 Forcing mechanism:
   * Anthropic: tool_choice = {"type": "tool", "name": <tool>}
@@ -170,13 +173,13 @@ class LLMClient:
         force_name: str | None,
     ) -> tuple[list[tuple[str, Any]], str]:
         """Return ([(tool_name, raw_args_dict)], assistant_text)."""
-        if self.cfg.provider == "anthropic":
+        if self.cfg.protocol == "anthropic":
             return self._request_anthropic(role, tools, messages, force_name)
         return self._request_openai(role, tools, messages, force_name)
 
     def _request_openai(self, role, tools, messages, force_name):
         payload = {
-            "model": self.cfg.models.for_role(role),
+            "model": self.cfg.model,
             "messages": messages,
             "temperature": self.cfg.temperature,
             "max_tokens": self.cfg.max_tokens,
@@ -203,7 +206,7 @@ class LLMClient:
         system_parts = [m["content"] for m in messages if m["role"] == "system"]
         convo = [m for m in messages if m["role"] != "system"]
         payload = {
-            "model": self.cfg.models.for_role(role),
+            "model": self.cfg.model,
             "max_tokens": self.cfg.max_tokens,
             "temperature": self.cfg.temperature,
             "messages": convo,
@@ -220,7 +223,10 @@ class LLMClient:
         }
         if self.cfg.api_key:
             headers["x-api-key"] = self.cfg.api_key
-        data = self._post(f"{self.cfg.base_url.rstrip('/')}/v1/messages", payload, headers)
+        # tolerate base_url given with or without a trailing /v1
+        base = self.cfg.base_url.rstrip("/")
+        base = base.removesuffix("/v1")
+        data = self._post(f"{base}/v1/messages", payload, headers)
         raw_calls: list[tuple[str, Any]] = []
         text_parts: list[str] = []
         for block in data.get("content", []):

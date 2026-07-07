@@ -1,21 +1,23 @@
 # RAVE configuration.
 # Works out of the box against a local Ollama server (OpenAI-compatible /v1).
-# Point base_url at any OpenAI-compatible endpoint, or set provider: anthropic.
+# For hosted APIs set llm.mode: api with a base_url; the wire protocol is
+# auto-detected from the URL (api.anthropic.com vs OpenAI-compatible).
 
 llm:
-  provider: openai            # openai | anthropic
-  base_url: http://localhost:11434/v1
-  api_key_env: RAVE_LLM_API_KEY   # name of env var holding the API key (optional for local servers)
+  # One model serves all four agent roles.
+  # mode local: keyless; base_url defaults to http://localhost:11434/v1, so a
+  #   local Ollama server hosting any model (llama, qwen, deepseek-r1, ...)
+  #   works out of the box — just set `model` to what you pulled.
+  # mode api: set base_url and put the key in the env var named api_key_env.
+  #   The wire protocol is auto-detected: api.anthropic.com speaks the
+  #   Anthropic protocol; every other URL speaks OpenAI-compatible /v1.
+  mode: local                 # local | api
+  base_url: ""                # empty in local mode = http://localhost:11434/v1
+  model: llama3.1:8b
+  api_key_env: RAVE_LLM_API_KEY   # api mode only: NAME of the env var holding the key
   timeout_seconds: 120
   max_tokens: 4096
   temperature: 0.2
-  models:
-    # Per-role routing: cheap/fast model for planner + researcher,
-    # strongest model for critic + writer. A single model everywhere is fine.
-    planner: local-model
-    researcher: local-model
-    critic: local-model
-    writer: local-model
 
 search:
   # Backend selection: "metasearch" needs metasearch_url; "commercial" needs an

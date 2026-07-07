@@ -6,6 +6,45 @@ adversarial verification loop, and outputs a fully cited report with a source
 ledger and verification log. It runs locally against Ollama or any
 OpenAI-compatible / Anthropic-style API endpoint.
 
+## Install in one line
+
+First, open a terminal (the command window):
+
+- **Windows**: press the Windows key, type `powershell`, press Enter.
+- **Mac**: press Cmd+Space, type `terminal`, press Enter.
+- **Ubuntu**: press Ctrl+Alt+T.
+- **VPS / server**: you're already in a shell after `ssh`.
+
+Paste with Ctrl+V (Windows/Ubuntu) or Cmd+V (Mac) — on some terminals it's
+right-click — then press Enter.
+
+**Mac / Ubuntu / VPS:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/PrabakaranR-code/rave/main/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/PrabakaranR-code/rave/main/install.ps1 | iex
+```
+
+The installer checks your computer, fetches what's missing, and hands over to
+the setup wizard. The wizard asks a few numbered questions — where RAVE's
+thinking should happen (a local AI model, an online service with an API key
+(your access key), or a provider bundle that also connects RAVE into that
+company's AI apps), sets up web search (a private SearXNG search engine via
+Docker, or the built-in crawler), runs a test question, and finishes. You
+never type model names, addresses, or paths — you only pick numbers.
+
+Afterwards, daily use is just:
+
+```sh
+rave            # ask a question, pick a depth, get a cited report
+rave setup      # change settings any time
+```
+
 ## Hard principles
 
 1. **Grounding over recall.** Factual answers come only from live retrieval
@@ -67,9 +106,11 @@ git clone <this-repo> && cd rave
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 
-# 1. an LLM endpoint — any OpenAI-compatible server works; for Ollama:
-#    ollama serve            (config.yaml already points at localhost:11434/v1)
-#    ollama pull <a tool-calling model>   # then set it in config.yaml → llm.models
+# 1. an LLM — local mode is keyless and defaults to Ollama's localhost:11434/v1:
+#    ollama serve
+#    ollama pull llama3.1:8b   # or qwen, deepseek-r1, ... — any tool-calling model
+#    then set config.yaml → llm.model to the model you pulled
+#    (hosted APIs work too: llm.mode: api + base_url + key; see docs/LIVE_RUN.md)
 
 # 2. a search backend — one of:
 #    * a self-hosted metasearch instance (keyless):
@@ -86,9 +127,31 @@ Add `--confirm` to review/edit the research plan before the swarm runs.
 Outputs: the report on stdout and in `report.md`, plus `runlog.jsonl` — a
 JSONL trace of every tool call (phase, role, args, forced/auto flags, budget).
 
+## For technical users (the expert layer)
+
+Skip the hand-holding entirely:
+
+```sh
+rave setup --expert                 # compact checklist + config.yaml field docs
+rave setup --expert --mode api --provider anthropic \
+           --model claude-sonnet-4-6 --search metasearch   # non-interactive
+```
+
+`config.yaml` is fully inline-documented (fields: `mode local|api`,
+`base_url`, `model`, `api_key_env`, search backend); the API key lives in
+`.env` (chmod 600), never in config. Daily pipeline:
+
+```sh
+python main.py "question" --mode speed|balanced|quality [--confirm] [--out report.md]
+python mcp_server.py                # stdio tool server for MCP clients
+python mcp_server.py --http --port 8765   # HTTP mode for remote connectors
+```
+
 ## CLI
 
 ```
+python main.py                      # daily chat mode
+python main.py setup [--expert ...] # setup wizard
 python main.py "question" [--mode speed|balanced|quality] [--confirm]
                [--out report.md] [--runlog runlog.jsonl]
                [--config config.yaml] [--context "extra context"]
@@ -113,17 +176,13 @@ still written (that final call is logged with `auto: true`).
 
 ```yaml
 llm:
-  provider: openai            # openai (any compatible /v1) | anthropic
-  base_url: http://localhost:11434/v1
-  api_key_env: RAVE_LLM_API_KEY   # env var NAME holding the key (if needed)
+  mode: local                 # local (keyless) | api (key required)
+  base_url: ""                # local: empty = http://localhost:11434/v1
+  model: llama3.1:8b          # ONE model serves all four agent roles
+  api_key_env: RAVE_LLM_API_KEY   # api mode only: env var NAME holding the key
   timeout_seconds: 120
   max_tokens: 4096
   temperature: 0.2
-  models:                     # per-role routing; one model everywhere is fine
-    planner: local-model      # cheap/fast
-    researcher: local-model   # cheap/fast
-    critic: local-model       # strongest available
-    writer: local-model       # strongest available
 
 search:
   backend: auto               # auto | metasearch | crawler | commercial
@@ -154,6 +213,11 @@ modes:                        # override budgets if you must
 
 Backend auto-selection: `metasearch_url` if set, else `commercial` if its key
 is present, else exit with a setup hint.
+
+LLM protocol auto-detection: a `base_url` on `api.anthropic.com` speaks the
+Anthropic messages protocol; every other URL speaks OpenAI-compatible chat
+completions (OpenAI, DeepSeek, Moonshot/Kimi, Perplexity Sonar, LM Studio,
+Ollama, …). See `docs/LIVE_RUN.md` for copy-paste configs.
 
 ## The Finding schema (used everywhere, no exceptions)
 

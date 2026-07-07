@@ -9,30 +9,43 @@ import os
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-
-class ModelRouting(BaseModel):
-    planner: str = "local-model"
-    researcher: str = "local-model"
-    critic: str = "local-model"
-    writer: str = "local-model"
-
-    def for_role(self, role: str) -> str:
-        try:
-            return getattr(self, role)
-        except AttributeError:
-            raise KeyError(f"unknown agent role: {role!r}")
+LOCAL_DEFAULT_BASE_URL = "http://localhost:11434/v1"
 
 
 class LLMConfig(BaseModel):
-    provider: str = "openai"  # openai | anthropic
-    base_url: str = "http://localhost:11434/v1"
-    api_key_env: str = "RAVE_LLM_API_KEY"
+    """Single-model LLM configuration.
+
+    mode "local" is keyless and defaults to a local server's OpenAI-compatible
+    /v1 (works out of the box with a local model server hosting any model);
+    mode "api" requires base_url and reads the key from the env var named by
+    api_key_env. The wire protocol is auto-detected from base_url: an
+    api.anthropic.com URL speaks the Anthropic messages protocol, everything
+    else speaks OpenAI-compatible chat completions.
+    """
+
+    mode: str = "local"  # local | api
+    base_url: str = ""
+    model: str = "llama3.1:8b"
+    api_key_env: str = "RAVE_LLM_API_KEY"  # api mode only
     timeout_seconds: float = 120.0
     max_tokens: int = 4096
     temperature: float = 0.2
-    models: ModelRouting = Field(default_factory=ModelRouting)
+
+    @model_validator(mode="after")
+    def _fill_and_check(self) -> "LLMConfig":
+        if self.mode not in ("local", "api"):
+            raise ValueError(f"llm.mode must be 'local' or 'api', got {self.mode!r}")
+        if not self.base_url:
+            if self.mode == "api":
+                raise ValueError("llm.mode 'api' requires llm.base_url")
+            self.base_url = LOCAL_DEFAULT_BASE_URL
+        return self
+
+    @property
+    def protocol(self) -> str:
+        return "anthropic" if "api.anthropic.com" in self.base_url else "openai"
 
     @property
     def api_key(self) -> str:
