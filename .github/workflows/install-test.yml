@@ -4,10 +4,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  # TEMPORARY while validating this workflow on its own PR (the integration
-  # token cannot workflow_dispatch); removed before merge.
-  pull_request:
-    paths: [".github/workflows/install-test.yml"]
 
 jobs:
   installer:
