@@ -19,7 +19,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     env:
-      RAVE_HOME: ${{ runner.temp }}/rave
       RAVE_REPO_URL: ${{ github.workspace }}
       RAVE_SKIP_DOCKER: "1"
     steps:
@@ -27,6 +26,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Set install location (runner context is unavailable in job env)
+        shell: bash
+        run: echo "RAVE_HOME=$RUNNER_TEMP/rave" >> "$GITHUB_ENV"
       - name: Allow cloning the workspace checkout
         shell: bash
         run: git config --global --add safe.directory '*'
