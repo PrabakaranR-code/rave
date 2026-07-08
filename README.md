@@ -144,7 +144,7 @@ rave setup --expert --mode api --provider anthropic \
 ```sh
 python main.py "question" --mode speed|balanced|quality [--confirm] [--out report.md]
 python mcp_server.py                # stdio tool server for MCP clients
-python mcp_server.py --http --port 8765   # HTTP mode for remote connectors
+python mcp_server.py --http --port 8765   # HTTP mode (needs RAVE_MCP_TOKEN)
 ```
 
 ## CLI
@@ -249,11 +249,17 @@ else `discard`. Workflow: change a prompt or module → run the harness → keep
 the commit if scores improve, revert if not. `results.tsv` stays untracked;
 the header is created on first run.
 
-## Tool server stub
+## Tool server / remote connector
 
-`mcp_server.py` exposes `deep_research(query, mode)` over JSON-RPC/stdio for
-a future remote-connector deployment. It is a stub — not wired into the main
-flow.
+`mcp_server.py` exposes `deep_research(query, mode)` to MCP clients over
+stdio (what local AI apps launch; the wizard writes their configs and
+verifies with a handshake) or over HTTP with `--http --port 8765` (what the
+wizard runs as a background service for claude.ai). HTTP mode requires a
+bearer token — `RAVE_MCP_TOKEN` from the environment or `.env`; requests
+authenticate with `Authorization: Bearer <token>` or `?token=<token>` in the
+URL. Remote connectors require HTTPS, so the wizard exposes the port through
+a cloudflared tunnel (or your own domain behind caddy) — see
+`docs/CONNECT_CLAUDE.md` after setup.
 
 ## Repository layout
 

@@ -255,22 +255,79 @@ def detect_public_ip(http_get: Callable[[str], object]) -> str | None:
 CONNECT_DOC = """\
 # Connect RAVE to claude.ai
 
-Your RAVE URL (the internet address of your RAVE): **{url}**
+**Important: claude.ai only accepts HTTPS (secure) addresses. A plain
+`http://<ip address>` will be rejected — that is why RAVE uses a
+tunnel (a private link from the internet to this computer) or a domain
+with automatic HTTPS.**
+
+Your RAVE URL (the internet address of your RAVE), with your access token
+(the password part of the address) already included:
+
+    {connector_url}
 
 1. Open claude.ai → Settings → Connectors → "+ Add custom connector".
-2. Paste `{url}` → Add.
+2. Paste the URL above → Add.
 3. In any chat tap "+", switch RAVE on, and say
    "Use RAVE to research …".
 
-The connector runs from this computer via `mcp_server.py --http --port {port}`.
-If the URL stops answering, re-run `rave setup` to restart the service.
+The connector runs from this computer via `mcp_server.py --http --port {port}`;
+the token lives in `.env` as RAVE_MCP_TOKEN (keep it private — anyone with
+the URL can use your RAVE). If the URL stops answering, re-run `rave setup`.
+"""
+
+CONNECT_DOC_NO_TUNNEL = """\
+# Connect RAVE to claude.ai — one step left
+
+**Important: claude.ai only accepts HTTPS (secure) addresses. A plain
+`http://<ip address>` will be rejected.** No tunnel (a private link from the
+internet to this computer) could be created right now, so pick one of:
+
+## Option A — retry the tunnel
+
+Run `rave setup` again; it retries cloudflared (the tunnel helper program).
+
+## Option B — your own domain + caddy (automatic HTTPS)
+
+1. Point your domain's DNS at this server{ip_note}.
+2. Install caddy (a web server that gets HTTPS certificates automatically):
+   https://caddyserver.com/docs/install
+3. Create a Caddyfile containing:
+
+       your-domain.example {{
+           reverse_proxy localhost:{port}
+       }}
+
+4. Run `caddy run`, then use this connector URL in claude.ai
+   (Settings → Connectors → "+ Add custom connector"):
+
+       https://your-domain.example/?token={token}
+
+The token lives in `.env` as RAVE_MCP_TOKEN (keep it private — anyone with
+the URL can use your RAVE).
 """
 
 
-def write_connect_doc(repo: Path, url: str, port: int = HTTP_PORT) -> Path:
+def write_connect_doc(
+    repo: Path,
+    url: str | None,
+    token: str,
+    port: int = HTTP_PORT,
+    public_ip: str | None = None,
+) -> Path:
+    """CONNECT_CLAUDE.md: working HTTPS URL when a tunnel exists, otherwise
+    the caddy/domain fallback. Never emits a plain-http connector URL."""
     path = repo / "docs" / "CONNECT_CLAUDE.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(CONNECT_DOC.format(url=url, port=port), encoding="utf-8")
+    if url:
+        text = CONNECT_DOC.format(
+            connector_url=f"{url.rstrip('/')}/?token={token}", port=port
+        )
+    else:
+        ip_note = f" (its public address is {public_ip})" if public_ip else ""
+        text = CONNECT_DOC_NO_TUNNEL.format(
+            ip_note=ip_note, port=port, token=token
+        )
+    path.write_text(text, encoding="utf-8")
     return path
 
 
