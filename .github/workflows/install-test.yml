@@ -1,0 +1,140 @@
+name: install-test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  installer:
+    name: installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      RAVE_REPO_URL: ${{ github.workspace }}
+      RAVE_SKIP_DOCKER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Set install location (runner context is unavailable in job env)
+        shell: bash
+        run: echo "RAVE_HOME=$RUNNER_TEMP/rave" >> "$GITHUB_ENV"
+      - name: Allow cloning the workspace checkout
+        shell: bash
+        run: git config --global --add safe.directory '*'
+
+      - name: Run installer non-interactively (stdin closed)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: sh install.sh < /dev/null
+
+      - name: Run installer non-interactively (stdin closed)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: pwsh -NoProfile -File install.ps1 < /dev/null
+
+      - name: Verify venv, rave command, and expert config
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          test -x "$RAVE_HOME/.venv/bin/python"
+          export PATH="$HOME/.local/bin:$PATH"
+          rave --help > /dev/null
+          rave setup --expert --mode api --provider anthropic \
+               --model claude-haiku-4-5 --search crawler --domains example.com
+          cd "$RAVE_HOME" && ./.venv/bin/python - <<'PY'
+          from config import load_config
+          cfg = load_config("config.yaml")
+          assert cfg.llm.mode == "api", cfg.llm.mode
+          assert cfg.llm.base_url == "https://api.anthropic.com"
+          assert cfg.llm.model == "claude-haiku-4-5"
+          assert cfg.llm.protocol == "anthropic"
+          assert cfg.search.backend == "crawler"
+          assert cfg.search.crawler.domains == ["example.com"]
+          print("config OK")
+          PY
+
+      - name: Verify venv, rave command, and expert config
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $venvPy = Join-Path $env:RAVE_HOME ".venv\Scripts\python.exe"
+          if (-not (Test-Path $venvPy)) { throw "venv missing" }
+          $shim = Join-Path $env:USERPROFILE ".local\bin\rave.cmd"
+          & $shim --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "rave --help failed" }
+          & $shim setup --expert --mode api --provider anthropic `
+               --model claude-haiku-4-5 --search crawler --domains example.com
+          if ($LASTEXITCODE -ne 0) { throw "expert setup failed" }
+          Set-Location $env:RAVE_HOME
+          & $venvPy -c @"
+          from config import load_config
+          cfg = load_config('config.yaml')
+          assert cfg.llm.mode == 'api'
+          assert cfg.llm.base_url == 'https://api.anthropic.com'
+          assert cfg.llm.model == 'claude-haiku-4-5'
+          assert cfg.search.backend == 'crawler'
+          assert cfg.search.crawler.domains == ['example.com']
+          print('config OK')
+          "@
+          if ($LASTEXITCODE -ne 0) { throw "config validation failed" }
+
+      - name: Mocked smoke run writes report.md
+        if: runner.os != 'Windows'
+        shell: bash
+        run: '"$RAVE_HOME/.venv/bin/python" "$RAVE_HOME/scripts/install_smoke.py"'
+
+      - name: Mocked smoke run writes report.md
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $venvPy = Join-Path $env:RAVE_HOME ".venv\Scripts\python.exe"
+          & $venvPy (Join-Path $env:RAVE_HOME "scripts\install_smoke.py")
+          if ($LASTEXITCODE -ne 0) { throw "smoke run failed" }
+
+  headless:
+    name: headless (bare ubuntu:24.04 container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container:
+      image: ubuntu:24.04
+    env:
+      RAVE_HOME: /root/rave
+      RAVE_SKIP_DOCKER: "1"
+      HOME: /root
+    steps:
+      - name: Bootstrap bare container (just enough to fetch the code)
+        run: |
+          apt-get update -y
+          apt-get install -y --no-install-recommends git ca-certificates
+          git config --global --add safe.directory '*'
+      - uses: actions/checkout@v4
+      - name: Prove the bare environment
+        run: |
+          command -v sudo && exit 1 || true      # no sudo
+          [ -z "${DISPLAY:-}" ]                  # no GUI
+          ( : < /dev/tty ) 2>/dev/null && exit 1 || true   # no usable tty
+          echo "bare environment confirmed"
+      - name: Run installer non-interactively (server, no tty, no browser)
+        run: RAVE_REPO_URL="$PWD" sh install.sh < /dev/null
+      - name: Verify venv, rave command, and expert config
+        run: |
+          test -x "$RAVE_HOME/.venv/bin/python"
+          export PATH="$HOME/.local/bin:$PATH"
+          rave --help > /dev/null
+          rave setup --expert --mode api --provider anthropic \
+               --model claude-haiku-4-5 --search crawler --domains example.com
+          cd "$RAVE_HOME" && ./.venv/bin/python -c "
+          from config import load_config
+          cfg = load_config('config.yaml')
+          assert cfg.llm.mode == 'api' and cfg.llm.model == 'claude-haiku-4-5'
+          assert cfg.search.crawler.domains == ['example.com']
+          print('config OK')"
+      - name: Mocked smoke run writes report.md
+        run: '"$RAVE_HOME/.venv/bin/python" "$RAVE_HOME/scripts/install_smoke.py"'

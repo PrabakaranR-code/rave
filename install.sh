@@ -11,9 +11,13 @@ say() { printf '%s\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # When piped from curl, stdin is the script itself — talk to the person
-# through the terminal device instead.
+# through the terminal device instead. `[ -r /dev/tty ]` is not enough:
+# on CI runners the node exists but opening it fails, so actually try.
+HAS_TTY=0
+if ( : < /dev/tty ) 2>/dev/null; then HAS_TTY=1; fi
+
 wait_enter() {
-  if [ -r /dev/tty ]; then
+  if [ "$HAS_TTY" = "1" ]; then
     printf '%s' "(press Enter when done) " > /dev/tty
     IFS= read -r _line < /dev/tty || true
   else
@@ -22,9 +26,16 @@ wait_enter() {
 }
 
 open_page() {
-  if have open; then open "$1" || true
+  if have open; then open "$1" 2>/dev/null || true
   elif have xdg-open; then xdg-open "$1" >/dev/null 2>&1 || true
   else say "Open this page in your browser: $1"; fi
+}
+
+need_fail() {
+  # Without a keyboard there is no install-and-press-Enter loop: fail fast
+  # with a clear message instead of hanging forever.
+  say "✗ $1"
+  exit 1
 }
 
 OS="linux"
@@ -56,8 +67,9 @@ while [ -z "$PY" ]; do
       || $APT install -y python3.11 python3.11-venv 2>/dev/null \
       || $APT install -y python3 python3-venv python3-pip || true
     PY="$(find_python || true)"
-    [ -z "$PY" ] && { say "✗ Could not install Python 3.11+. Install it, then re-run."; exit 1; }
+    [ -z "$PY" ] && need_fail "Could not install Python 3.11+. Install it, then re-run."
   else
+    [ "$HAS_TTY" != "1" ] && need_fail "Python 3.11+ is required. Install it from python.org, then re-run."
     say "RAVE needs Python 3.11 or newer (the language RAVE runs on)."
     say "I've opened the download page. Install it, then come back."
     open_page "https://www.python.org/downloads/"
@@ -72,8 +84,9 @@ while ! have git; do
   if [ "$OS" = "ubuntu" ]; then
     say "→ Installing Git (a program that downloads code)…"
     $APT update -y >/dev/null 2>&1 || true
-    $APT install -y git || { say "✗ Could not install Git."; exit 1; }
+    $APT install -y git || need_fail "Could not install Git."
   else
+    [ "$HAS_TTY" != "1" ] && need_fail "Git is required. Install it from git-scm.com, then re-run."
     say "RAVE needs Git (a program that downloads code)."
     say "I've opened the download page. Install it, then come back."
     open_page "https://git-scm.com/downloads"
@@ -83,7 +96,7 @@ done
 say "✓ Git found"
 
 # --- Docker (a helper program for the search engine) — optional here --------
-if ! have docker && [ "$OS" = "ubuntu" ]; then
+if ! have docker && [ "$OS" = "ubuntu" ] && [ "${RAVE_SKIP_DOCKER:-0}" != "1" ]; then
   say "→ Installing Docker (a helper program for the search engine)…"
   $APT install -y docker.io >/dev/null 2>&1 || true
 fi
@@ -97,7 +110,14 @@ else
   git clone "$REPO_URL" "$DIR"
 fi
 cd "$DIR"
-"$PY" -m venv .venv
+if ! "$PY" -m venv .venv 2>/dev/null; then
+  # some minimal images ship python without the venv module
+  if [ "$OS" = "ubuntu" ]; then
+    VENV_PKG="$("$PY" -c 'import sys; print(f"python3.{sys.version_info[1]}-venv")')"
+    $APT install -y "$VENV_PKG" python3-venv >/dev/null 2>&1 || true
+  fi
+  "$PY" -m venv .venv || need_fail "Could not create the Python sandbox (venv)."
+fi
 ./.venv/bin/pip install --quiet --upgrade pip
 ./.venv/bin/pip install --quiet -r requirements.txt
 say "✓ RAVE installed"
@@ -116,7 +136,7 @@ esac
 say "✓ Command installed: rave"
 
 # --- Hand over to the setup wizard ------------------------------------------
-if [ -r /dev/tty ]; then
+if [ "$HAS_TTY" = "1" ]; then
   exec "$DIR/.venv/bin/python" "$DIR/main.py" setup < /dev/tty
 else
   say "Setup is next — run:  rave setup"
