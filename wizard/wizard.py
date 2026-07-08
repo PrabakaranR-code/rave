@@ -318,45 +318,52 @@ def _ensure_app(fx: Effects, app_key: str, scan: SystemScan) -> bool:
 
 
 def claude_ai_flow(fx: Effects, scan: SystemScan, repo: Path, home: Path) -> None:
+    # The connector token: generated once, stored only in .env (chmod 600).
+    import secrets as _secrets
+
+    token = os.environ.get("RAVE_MCP_TOKEN") or _secrets.token_urlsafe(24)
+    write_env(repo / ".env", "RAVE_MCP_TOKEN", token)
+    os.environ["RAVE_MCP_TOKEN"] = token
+
     say(fx, screen("service_note"))
     ok, msg = mcp_apps.install_service(repo, scan.os_name, fx.run, home)
     say(fx, ("✓ " if ok else "• ") + msg)
-    url: str | None = None
-    if scan.headless:  # VPS: it already has a public address
-        ip = mcp_apps.detect_public_ip(fx.http_get)
-        if ip:
-            url = f"http://{ip}:{mcp_apps.HTTP_PORT}"
-    if url is None:
-        import shutil as _shutil
 
-        if not _shutil.which("cloudflared"):
-            if scan.headless:
-                fx.run(["sh", "-c",
-                        "curl -fsSL -o /usr/local/bin/cloudflared "
-                        "https://github.com/cloudflare/cloudflared/releases/"
-                        "latest/download/cloudflared-linux-amd64 "
-                        "&& chmod +x /usr/local/bin/cloudflared"], timeout=600)
-            else:
-                fx.open_url(CLOUDFLARED_PAGE)
-                enter_loop(
-                    fx, "RAVE needs cloudflared (the tunnel helper program) to"
-                        " create a tunnel (a private link from the internet to"
-                        " this computer). I've opened its download page —"
-                        " install it, then press Enter.",
-                    check=lambda: bool(_shutil.which("cloudflared")),
-                    max_tries=3,
-                )
-        say(fx, screen("tunnel_note"))
-        run_stream = fx.extra.get("run_stream", _default_run_stream)
-        url = mcp_apps.start_tunnel(run_stream)
+    # claude.ai requires HTTPS — a tunnel on every platform, VPS included;
+    # a plain http://ip:port connector would be rejected.
+    say(fx, screen("https_note"))
+    import shutil as _shutil
+
+    if not _shutil.which("cloudflared"):
+        if scan.headless:
+            fx.run(["sh", "-c",
+                    "curl -fsSL -o /usr/local/bin/cloudflared "
+                    "https://github.com/cloudflare/cloudflared/releases/"
+                    "latest/download/cloudflared-linux-amd64 "
+                    "&& chmod +x /usr/local/bin/cloudflared"], timeout=600)
+        else:
+            fx.open_url(CLOUDFLARED_PAGE)
+            enter_loop(
+                fx, "RAVE needs cloudflared (the tunnel helper program) to"
+                    " create a tunnel (a private link from the internet to"
+                    " this computer). I've opened its download page —"
+                    " install it, then press Enter.",
+                check=lambda: bool(_shutil.which("cloudflared")),
+                max_tries=3,
+            )
+    say(fx, screen("tunnel_note"))
+    run_stream = fx.extra.get("run_stream", _default_run_stream)
+    url = mcp_apps.start_tunnel(run_stream)
+
+    public_ip = mcp_apps.detect_public_ip(fx.http_get) if scan.headless else None
+    doc = mcp_apps.write_connect_doc(repo, url, token, public_ip=public_ip)
     if url:
-        doc = mcp_apps.write_connect_doc(repo, url)
-        say(fx, screen("public_url", url=url))
+        say(fx, screen("public_url", url=f"{url.rstrip('/')}/?token={token}"))
         say(fx, doc.read_text(encoding="utf-8"))
     else:
-        doc = mcp_apps.write_connect_doc(repo, f"http://localhost:{mcp_apps.HTTP_PORT}")
-        say(fx, "• Couldn't get a public link right now. Instructions are saved"
-                f" in {doc} — re-run rave setup any time to retry.")
+        say(fx, "• Couldn't create the tunnel right now. claude.ai needs an"
+                f" HTTPS address, so I saved two alternatives in {doc} —"
+                " re-run rave setup any time to retry.")
 
 
 def usage_followup(fx: Effects, scan: SystemScan, repo: Path, home: Path) -> None:

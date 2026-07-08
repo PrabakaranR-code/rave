@@ -20,6 +20,7 @@ which keeps multi-turn agent loops identical across providers.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -122,6 +123,12 @@ class LLMClient:
         last_error = "model returned no tool call"
         for _attempt in range(1 + MAX_FORCED_RETRIES):
             raw_calls, raw_text = self._request(role, tools, convo, force_name)
+            if not raw_calls and raw_text:
+                # Some local OpenAI-compatible servers ignore tool_choice and
+                # answer in prose; salvage a JSON tool call when one is there.
+                raw_calls = extract_tool_call_from_text(
+                    raw_text, set(by_name), force_name
+                )
             if not raw_calls:
                 last_error = (
                     "Direct answers are rejected. You MUST respond with a call to "
@@ -135,6 +142,10 @@ class LLMClient:
             try:
                 calls = []
                 for name, args in raw_calls:
+                    if isinstance(args, str):
+                        # malformed argument JSON surfaces here and feeds the
+                        # same retry loop as a schema violation
+                        args = json.loads(args)
                     if name not in by_name:
                         raise ValueError(f"tool {name!r} is not allowed here")
                     if force_name is not None and name != force_name:
@@ -197,9 +208,9 @@ class LLMClient:
         raw_calls: list[tuple[str, Any]] = []
         for tc in msg.get("tool_calls") or []:
             fn = tc.get("function", {})
-            args_raw = fn.get("arguments", "{}")
-            args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
-            raw_calls.append((fn.get("name", ""), args))
+            # arguments stay raw here; _tool_turn parses them inside its retry
+            # loop so malformed JSON becomes a validation retry, not a crash
+            raw_calls.append((fn.get("name", ""), fn.get("arguments", "{}")))
         return raw_calls, msg.get("content") or ""
 
     def _request_anthropic(self, role, tools, messages, force_name):
@@ -247,6 +258,41 @@ class LLMClient:
             return resp.json()
         except json.JSONDecodeError as e:
             raise LLMError(f"LLM endpoint returned non-JSON: {resp.text[:200]}") from e
+
+
+_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
+
+
+def extract_tool_call_from_text(
+    text: str, allowed_names: set[str], force_name: str | None = None
+) -> list[tuple[str, Any]]:
+    """Best-effort salvage of a JSON tool call embedded in assistant prose.
+
+    Recognizes {"name"/"tool"/"function": ..., "arguments"/"parameters"/
+    "input": {...}} anywhere in the text (fenced or not). For forced calls, a
+    bare JSON object is treated as the arguments themselves; validation
+    afterwards still gates what gets through.
+    """
+    decoder = json.JSONDecoder()
+    candidates = [m.group(1) for m in _FENCE_RE.finditer(text)] + [text]
+    for cand in candidates:
+        for m in re.finditer(r"\{", cand):
+            try:
+                obj, _ = decoder.raw_decode(cand[m.start():])
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            name = obj.get("name") or obj.get("tool") or obj.get("function")
+            args = obj.get("arguments") or obj.get("parameters") or obj.get("input")
+            if isinstance(name, str) and name in allowed_names and isinstance(args, dict):
+                return [(name, args)]
+            if (
+                force_name is not None
+                and not any(k in obj for k in ("name", "tool", "function"))
+            ):
+                return [(force_name, obj)]
+    return []
 
 
 @dataclass(frozen=True)

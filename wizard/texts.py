@@ -101,6 +101,11 @@ SCREENS: dict[str, str] = {
         "Setting up RAVE's connector as a background service (so RAVE stays"
         " reachable)…"
     ),
+    "https_note": (
+        "Heads up: claude.ai only accepts HTTPS (secure) addresses, so RAVE"
+        " will use a tunnel (a private link from the internet to this"
+        " computer) instead of a plain address."
+    ),
     "tunnel_note": (
         "Creating a tunnel (a private link from the internet to this computer)"
         " with cloudflared (the tunnel helper program)…"

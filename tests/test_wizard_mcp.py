@@ -75,20 +75,73 @@ def test_handshake_fails_gracefully_for_missing_server(tmp_path):
     assert mcp_apps.handshake(tmp_path) is False
 
 
-def test_serve_http_initialize_and_health():
-    server = mcp_server.serve_http(0, host="127.0.0.1")
+def http_server(token):
+    server = mcp_server.serve_http(0, host="127.0.0.1", token=token)
     port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{port}"
+
+
+def test_serve_http_requires_bearer_token():
+    server, base = http_server(token="s3cret")
     try:
-        base = f"http://127.0.0.1:{port}"
+        # health stays open, carries no data
         health = httpx.get(base)
         assert health.status_code == 200 and health.json()["server"] == "rave"
-        resp = httpx.post(base, json={"jsonrpc": "2.0", "id": 1,
-                                      "method": "initialize"})
-        assert resp.json()["result"]["serverInfo"]["name"] == "rave"
-        bad = httpx.post(base, content=b"not json")
-        assert bad.status_code == 400
+        # unauthenticated / wrong-token POSTs are rejected
+        assert httpx.post(base, json={"id": 1, "method": "initialize"}).status_code == 401
+        assert httpx.post(base, json={"id": 1, "method": "initialize"},
+                          headers={"Authorization": "Bearer wrong"}).status_code == 401
+        # bearer header works
+        ok = httpx.post(base, json={"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+                        headers={"Authorization": "Bearer s3cret"})
+        assert ok.status_code == 200
+        assert ok.json()["result"]["serverInfo"]["name"] == "rave"
+        assert ok.headers.get("Mcp-Session-Id")  # minted on initialize
+        # token in the URL works (connector UIs that only take an address)
+        ok2 = httpx.post(f"{base}/?token=s3cret",
+                         json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        assert ok2.status_code == 200
+        assert ok2.json()["result"]["tools"][0]["name"] == "deep_research"
+    finally:
+        server.shutdown()
+
+
+def test_serve_http_with_no_token_rejects_all_posts():
+    server, base = http_server(token="")
+    try:
+        resp = httpx.post(base, json={"id": 1, "method": "initialize"})
+        assert resp.status_code == 401
+        assert "RAVE_MCP_TOKEN" in resp.json()["hint"]
+    finally:
+        server.shutdown()
+
+
+def test_serve_http_streamable_expectations():
+    server, base = http_server(token="s3cret")
+    auth = {"Authorization": "Bearer s3cret"}
+    try:
+        # wrong content type
+        r = httpx.post(base, content=b"x=1", headers={
+            **auth, "Content-Type": "application/x-www-form-urlencoded"})
+        assert r.status_code == 415
+        # unsatisfiable Accept
+        r = httpx.post(base, json={"id": 1, "method": "tools/list"},
+                       headers={**auth, "Accept": "text/html"})
+        assert r.status_code == 406
+        # streamable-http style Accept is fine; session id passes through
+        r = httpx.post(base, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                       headers={**auth,
+                                "Accept": "application/json, text/event-stream",
+                                "Mcp-Session-Id": "sess-42"})
+        assert r.status_code == 200 and r.headers["Mcp-Session-Id"] == "sess-42"
+        # GET asking for a server-push stream is refused with Allow: POST
+        r = httpx.get(base, headers={"Accept": "text/event-stream"})
+        assert r.status_code == 405 and r.headers["Allow"] == "POST"
+        # malformed JSON body
+        r = httpx.post(base, content=b"not json",
+                       headers={**auth, "Content-Type": "application/json"})
+        assert r.status_code == 400
     finally:
         server.shutdown()
 
@@ -133,11 +186,69 @@ def test_detect_public_ip():
     assert mcp_apps.detect_public_ip(lambda u: bad) is None
 
 
-def test_connect_docs_generated(tmp_path):
-    doc = mcp_apps.write_connect_doc(tmp_path, "https://x.trycloudflare.com")
+def test_connect_doc_with_tunnel_embeds_token_and_https_note(tmp_path):
+    doc = mcp_apps.write_connect_doc(tmp_path, "https://x.trycloudflare.com", "tok123")
     text = doc.read_text()
-    assert "https://x.trycloudflare.com" in text
+    assert "https://x.trycloudflare.com/?token=tok123" in text
     assert "Add custom connector" in text
-    assert "internet address of your RAVE" in text  # dual language
+    assert "only accepts HTTPS" in text                # requirement stated plainly
+    assert "internet address of your RAVE" in text     # dual language
+    assert "tunnel (a private link" in text
     guide = mcp_apps.write_chatgpt_doc(tmp_path)
     assert guide.name == "CONNECT_CHATGPT.md" and guide.exists()
+
+
+def test_connect_doc_without_tunnel_offers_caddy_never_plain_http(tmp_path):
+    doc = mcp_apps.write_connect_doc(tmp_path, None, "tok123",
+                                     public_ip="203.0.113.9")
+    text = doc.read_text()
+    assert "only accepts HTTPS" in text
+    assert "caddy" in text and "reverse_proxy localhost:8765" in text
+    assert "203.0.113.9" in text
+    assert "https://your-domain.example/?token=tok123" in text
+    assert "http://203.0.113.9" not in text  # plain-http connector never offered
+
+
+def test_claude_ai_flow_vps_prefers_tunnel_over_plain_ip(tmp_path, monkeypatch):
+    from tests.test_wizard_flows import make_fx
+    from tests.test_wizard_scan import scan_fixture
+    from wizard.wizard import claude_ai_flow
+
+    monkeypatch.setenv("RAVE_MCP_TOKEN", "")
+    monkeypatch.delenv("RAVE_MCP_TOKEN", raising=False)
+    repo, home = tmp_path / "repo", tmp_path / "home"
+    repo.mkdir(), home.mkdir()
+    fx, printed, _, _ = make_fx(run_map={("systemctl",): (0, "")})
+    fx.extra["run_stream"] = lambda cmd, timeout: (
+        "INF https://vps-words.trycloudflare.com\n"
+    )
+    claude_ai_flow(fx, scan_fixture(headless=True, os_name="ubuntu"), repo, home)
+
+    env_text = (repo / ".env").read_text()
+    assert "RAVE_MCP_TOKEN=" in env_text
+    token = env_text.split("RAVE_MCP_TOKEN=")[1].strip()
+    doc_text = (repo / "docs" / "CONNECT_CLAUDE.md").read_text()
+    assert f"https://vps-words.trycloudflare.com/?token={token}" in doc_text
+    joined = "\n".join(printed)
+    assert "only accepts HTTPS" in joined
+    assert "http://203" not in joined and "http://vps" not in joined
+
+
+def test_claude_ai_flow_tunnel_failure_falls_back_to_caddy_doc(tmp_path, monkeypatch):
+    from tests.test_wizard_flows import make_fx
+    from tests.test_wizard_scan import scan_fixture
+    from wizard.wizard import claude_ai_flow
+
+    monkeypatch.setenv("RAVE_MCP_TOKEN", "fixed-token")
+    repo, home = tmp_path / "repo", tmp_path / "home"
+    repo.mkdir(), home.mkdir()
+    fx, printed, _, _ = make_fx(run_map={("systemctl",): (0, "")})
+    fx.extra["run_stream"] = lambda cmd, timeout: "no tunnel today"
+    ip = type("R", (), {"text": "203.0.113.9"})()
+    fx.http_get = lambda url, timeout=3.0: ip
+    claude_ai_flow(fx, scan_fixture(headless=True, os_name="ubuntu"), repo, home)
+
+    doc_text = (repo / "docs" / "CONNECT_CLAUDE.md").read_text()
+    assert "caddy" in doc_text and "fixed-token" in doc_text
+    assert "203.0.113.9" in doc_text
+    assert any("HTTPS address" in p for p in printed)

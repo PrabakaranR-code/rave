@@ -151,6 +151,97 @@ def test_anthropic_forcing_and_parsing():
     assert reqs[0]["tools"][0]["input_schema"]["type"] == "object"
 
 
+def raw_args_response(name: str, raw_arguments: str) -> dict:
+    """A tool call whose arguments string is NOT valid JSON."""
+    return {
+        "choices": [
+            {
+                "message": {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": name, "arguments": raw_arguments},
+                        }
+                    ],
+                }
+            }
+        ]
+    }
+
+
+def test_malformed_json_arguments_feed_the_retry_loop():
+    reqs: list[dict] = []
+    client = make_client(
+        [
+            raw_args_response("plan_preamble", '{"current_goal": "x", oops'),
+            raw_args_response("plan_preamble", "not json at all"),
+            openai_tool_response("plan_preamble", VALID_PREAMBLE),
+        ],
+        reqs,
+    )
+    out = client.forced_tool("planner", PREAMBLE, [{"role": "user", "content": "go"}])
+    assert isinstance(out, PlanPreambleArgs)
+    assert len(reqs) == 3  # two malformed rounds retried, then success
+    assert any("VALIDATION ERROR" in m["content"] for m in reqs[1]["messages"])
+    assert any("VALIDATION ERROR" in m["content"] for m in reqs[2]["messages"])
+
+
+def test_persistently_malformed_json_fails_loudly_not_crash():
+    bad = raw_args_response("plan_preamble", "{{{")
+    client = make_client([bad, bad, bad], [])
+    with pytest.raises(ForcedToolError):
+        client.forced_tool("planner", PREAMBLE, [{"role": "user", "content": "go"}])
+
+
+def text_only_response(content: str) -> dict:
+    return {"choices": [{"message": {"content": content, "tool_calls": []}}]}
+
+
+def test_fallback_extracts_named_tool_call_from_prose():
+    reqs: list[dict] = []
+    content = (
+        "Sure — calling the tool now:\n"
+        + json.dumps({"name": "plan_preamble", "arguments": VALID_PREAMBLE})
+    )
+    client = make_client([text_only_response(content)], reqs)
+    out = client.forced_tool("planner", PREAMBLE, [{"role": "user", "content": "go"}])
+    assert isinstance(out, PlanPreambleArgs)
+    assert len(reqs) == 1  # salvaged without another round trip
+
+
+def test_fallback_accepts_bare_args_in_fenced_json_for_forced_tool():
+    content = "```json\n" + json.dumps(VALID_PREAMBLE) + "\n```"
+    client = make_client([text_only_response(content)], [])
+    out = client.forced_tool("planner", PREAMBLE, [{"role": "user", "content": "go"}])
+    assert out.current_goal == VALID_PREAMBLE["current_goal"]
+
+
+def test_fallback_works_for_choose_tool_with_named_call():
+    content = 'Using search: {"tool": "web_search", "parameters": {"query": "q1"}}'
+    client = make_client([text_only_response(content)], [])
+    calls = client.choose_tool(
+        "researcher", [SEARCH, DONE], [{"role": "user", "content": "go"}]
+    )
+    assert calls[0].name == "web_search"
+    assert calls[0].arguments.query == "q1"
+
+
+def test_fallback_ignores_irrelevant_json_and_still_retries():
+    # a named call to a tool that is not offered must not be salvaged
+    content = '{"name": "rm_rf", "arguments": {"path": "/"}}'
+    client = make_client(
+        [text_only_response(content),
+         openai_tool_response("done", {"coverage_summary": "ok"})],
+        [],
+    )
+    calls = client.choose_tool(
+        "researcher", [SEARCH, DONE], [{"role": "user", "content": "go"}]
+    )
+    assert calls[0].name == "done"
+
+
 def test_anthropic_base_url_with_v1_suffix_still_posts_to_v1_messages():
     urls: list[str] = []
 

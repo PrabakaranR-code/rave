@@ -1,16 +1,26 @@
-"""Stub tool server exposing deep_research(query, mode) over JSON-RPC/stdio.
+"""Tool server exposing deep_research(query, mode) to MCP clients.
 
-This is a forward-looking deployment shim for a future remote-connector
-setup; it is NOT wired into the main CLI flow. It speaks the minimal subset
-of the model-context tool protocol needed to list and call one tool:
+Two transports:
+  * stdio (default) — what local AI apps launch; the setup wizard writes
+    their configs to point here and verifies with a handshake.
+  * --http — the remote-connector mode the wizard runs as a background
+    service behind an HTTPS tunnel or reverse proxy. POST a JSON-RPC body to
+    /, authenticated with a bearer token (env RAVE_MCP_TOKEN, or ?token=…
+    in the URL for connector UIs that only take an address). Content-Type/
+    Accept are validated and Mcp-Session-Id is passed through (or minted on
+    initialize) for streamable-http-style clients; server-initiated SSE
+    streams are not supported.
+
+Both speak the minimal protocol subset needed to list and call one tool:
   initialize → tools/list → tools/call {name: "deep_research"}.
-
-Run:  python mcp_server.py   (reads JSON-RPC requests line-by-line on stdin)
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
+import uuid
+from urllib.parse import parse_qs, urlsplit
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_INFO = {"name": "rave", "version": "0.1.0"}
@@ -103,51 +113,104 @@ def serve(stdin=None, stdout=None) -> None:
             stdout.flush()
 
 
-def serve_http(port: int, host: str = "0.0.0.0", runner=deep_research):
-    """Minimal HTTP front: POST a JSON-RPC request body to /, get the response.
+def serve_http(port: int, host: str = "0.0.0.0", runner=deep_research,
+               token: str | None = None):
+    """HTTP front for remote connectors: POST a JSON-RPC body to /.
 
-    Used by the setup wizard to expose deep_research to remote connectors
-    (behind a tunnel or on a VPS). Returns the server; call serve_forever().
+    Authentication is required on every POST: `Authorization: Bearer <token>`
+    or `?token=<token>` in the URL (for connector UIs that only accept an
+    address). The token comes from the argument or the RAVE_MCP_TOKEN env
+    var; with no token configured, all POSTs are rejected with a hint.
+    Returns the server; call serve_forever().
     """
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    expected = os.environ.get("RAVE_MCP_TOKEN", "") if token is None else token
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # quiet
             pass
 
-        def _reply(self, code: int, payload: dict) -> None:
+        def _reply(self, code: int, payload: dict,
+                   extra_headers: dict | None = None) -> None:
             body = json.dumps(payload).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            for k, v in (extra_headers or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
-        def do_GET(self):  # health check for connector setup
+        def _authorized(self) -> bool:
+            if not expected:
+                return False
+            if self.headers.get("Authorization", "") == f"Bearer {expected}":
+                return True
+            qs = parse_qs(urlsplit(self.path).query)
+            return expected in qs.get("token", [])
+
+        def do_GET(self):
+            if "text/event-stream" in (self.headers.get("Accept") or ""):
+                # streamable-http server-push streams are not supported
+                self._reply(405, {"error": "SSE not supported; POST JSON-RPC"},
+                            {"Allow": "POST"})
+                return
             self._reply(200, {"ok": True, "server": SERVER_INFO["name"]})
 
         def do_POST(self):
+            if not self._authorized():
+                hint = (
+                    "send Authorization: Bearer <token> or ?token=<token>"
+                    if expected else
+                    "server has no token configured; set RAVE_MCP_TOKEN"
+                )
+                self._reply(401, {"error": "unauthorized", "hint": hint})
+                return
+            ctype = self.headers.get("Content-Type", "") or ""
+            if "application/json" not in ctype:
+                self._reply(415, {"error": "Content-Type must be application/json"})
+                return
+            accept = self.headers.get("Accept") or "*/*"
+            if not any(t in accept for t in
+                       ("application/json", "*/*", "text/event-stream")):
+                self._reply(406, {"error": "responses are application/json"})
+                return
             length = int(self.headers.get("Content-Length", 0))
             try:
                 req = json.loads(self.rfile.read(length))
             except json.JSONDecodeError:
                 self._reply(400, {"error": "invalid JSON"})
                 return
+            session_id = self.headers.get("Mcp-Session-Id", "")
+            if not session_id and req.get("method") == "initialize":
+                session_id = uuid.uuid4().hex
             resp = handle_request(req, runner=runner)
-            self._reply(200, resp if resp is not None else {"ok": True})
+            headers = {"Mcp-Session-Id": session_id} if session_id else None
+            self._reply(200, resp if resp is not None else {"ok": True}, headers)
 
     return ThreadingHTTPServer((host, port), Handler)
 
 
 if __name__ == "__main__":
     import argparse
+    import secrets
+    from pathlib import Path
 
+    from wizard.envfile import load_env
+
+    load_env(Path(__file__).resolve().parent / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--http", action="store_true",
                         help="serve JSON-RPC over HTTP instead of stdio")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     if args.http:
+        if not os.environ.get("RAVE_MCP_TOKEN"):
+            ephemeral = secrets.token_urlsafe(24)
+            os.environ["RAVE_MCP_TOKEN"] = ephemeral
+            print(f"RAVE_MCP_TOKEN not set; using one-off token: {ephemeral}",
+                  file=sys.stderr)
         serve_http(args.port).serve_forever()
     else:
         serve()
