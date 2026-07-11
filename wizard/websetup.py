@@ -73,14 +73,27 @@ def start_searxng(
     return None
 
 
-def parse_trusted_domains(raw: str) -> list[str]:
-    """Free-text domain list → cleaned domains; empty input → good defaults."""
-    if not raw.strip():
-        return list(DEFAULT_TRUSTED)
+def _clean_domains(raw: str) -> list[str]:
     parts = [p.strip().rstrip("/") for p in raw.replace(",", " ").split()]
-    domains = []
+    domains: list[str] = []
     for p in parts:
         p = p.removeprefix("https://").removeprefix("http://")
         if p and "." in p and p not in domains:
             domains.append(p)
-    return domains or list(DEFAULT_TRUSTED)
+    return domains
+
+
+def parse_trusted_domains(raw: str) -> list[str]:
+    """Free-text domain list → cleaned domains; empty input → good defaults."""
+    if not raw.strip():
+        return list(DEFAULT_TRUSTED)
+    return _clean_domains(raw) or list(DEFAULT_TRUSTED)
+
+
+def parse_outlets(raw: str) -> list[str]:
+    """Free-text outlet list → cleaned domains; empty/junk input → empty list.
+
+    Unlike parse_trusted_domains this never injects defaults: SCOUT already
+    ships a good outlet set, so "keep defaults" means passing nothing.
+    """
+    return _clean_domains(raw)

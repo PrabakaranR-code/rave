@@ -50,13 +50,19 @@ def test_main_exits_nonzero_and_prints_halt(monkeypatch, capsys):
     assert "HALT: no working web access" in capsys.readouterr().err
 
 
-def test_main_exits_with_setup_hint_when_no_backend(tmp_path, capsys):
+def test_main_exits_with_setup_hint_when_backend_broken(tmp_path, capsys):
+    # An explicitly named backend whose requirement is missing exits 3 with the
+    # setup hint. (A missing/empty config now defaults to the keyless SCOUT
+    # backend, so "no backend" is no longer an error state.)
+    cfg = tmp_path / "broken.yaml"
+    cfg.write_text("search:\n  backend: metasearch\n  metasearch_url: \"\"\n",
+                   encoding="utf-8")
     rc = main_mod.main([
-        "q", "--config", str(tmp_path / "absent.yaml"),
+        "q", "--config", str(cfg),
         "--out", str(tmp_path / "r.md"), "--runlog", str(tmp_path / "l.jsonl"),
     ])
     assert rc == 3
-    assert "No search backend configured" in capsys.readouterr().err
+    assert "backend" in capsys.readouterr().err.lower()
 
 
 # --- swarm parallelism -----------------------------------------------------

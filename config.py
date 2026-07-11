@@ -67,11 +67,27 @@ class CrawlerConfig(BaseModel):
     max_pages_per_domain: int = 50
 
 
+class ScoutConfig(BaseModel):
+    """Settings for the built-in SCOUT search backend (keyless, no server).
+
+    trusted_outlets: domains marked trusted=True by SCOUT; RAVE gives these a
+      vetting quality boost. sources: per-source enable/disable overrides
+      (e.g. {"startpage": false}). searxng_public stays off unless explicitly
+      enabled here. offline: fixture-only mode for tests and smoke checks.
+    """
+
+    trusted_outlets: list[str] = Field(default_factory=list)
+    sources: dict[str, bool] = Field(default_factory=dict)
+    searxng_public: bool = False
+    offline: bool = False
+
+
 class SearchConfig(BaseModel):
-    backend: str = "auto"  # auto | metasearch | crawler | commercial
+    backend: str = "auto"  # auto | scout | metasearch | crawler | commercial
     metasearch_url: str = ""
     commercial: CommercialSearchConfig = Field(default_factory=CommercialSearchConfig)
     crawler: CrawlerConfig = Field(default_factory=CrawlerConfig)
+    scout: ScoutConfig = Field(default_factory=ScoutConfig)
 
 
 class EmbeddingsConfig(BaseModel):

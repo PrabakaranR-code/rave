@@ -34,9 +34,10 @@ The installer checks your computer, fetches what's missing, and hands over to
 the setup wizard. The wizard asks a few numbered questions — where RAVE's
 thinking should happen (a local AI model, an online service with an API key
 (your access key), or a provider bundle that also connects RAVE into that
-company's AI apps), sets up web search (a private SearXNG search engine via
-Docker, or the built-in crawler), runs a test question, and finishes. You
-never type model names, addresses, or paths — you only pick numbers.
+company's AI apps), how to search the web (built-in SCOUT by default, an
+optional private SearXNG server via Docker for extra breadth, or the crawler),
+runs a test question, and finishes. You never type model names, addresses, or
+paths — you only pick numbers.
 
 Afterwards, daily use is just:
 
@@ -112,11 +113,14 @@ pip install -r requirements.txt
 #    then set config.yaml → llm.model to the model you pulled
 #    (hosted APIs work too: llm.mode: api + base_url + key; see docs/LIVE_RUN.md)
 
-# 2. a search backend — one of:
-#    * a self-hosted metasearch instance (keyless):
-#        search.metasearch_url: http://localhost:8080
+# 2. a search backend — SCOUT is the default and needs nothing installed:
+#    * SCOUT (recommended, keyless, no server): search.backend: scout —
+#        built-in multi-source search across independent engines, science
+#        databases, Wikipedia, and news feeds. Nothing to set up.
+#    * SearXNG for extra Google/Bing breadth (self-hosted, needs Docker):
+#        search.backend: metasearch, search.metasearch_url: http://localhost:8080
 #    * a commercial search API:
-#        search.commercial.endpoint + export RAVE_SEARCH_API_KEY=...
+#        search.backend: commercial + export RAVE_SEARCH_API_KEY=...
 #    * a local crawl of domains you name:
 #        search.backend: crawler, search.crawler.domains: [docs.example.com]
 
@@ -134,12 +138,13 @@ Skip the hand-holding entirely:
 ```sh
 rave setup --expert                 # compact checklist + config.yaml field docs
 rave setup --expert --mode api --provider anthropic \
-           --model claude-sonnet-4-6 --search metasearch   # non-interactive
+           --model claude-sonnet-4-6 --search scout   # non-interactive
 ```
 
 `config.yaml` is fully inline-documented (fields: `mode local|api`,
-`base_url`, `model`, `api_key_env`, search backend); the API key lives in
-`.env` (chmod 600), never in config. Daily pipeline:
+`base_url`, `model`, `api_key_env`, search backend `scout|metasearch|crawler|
+commercial`); the API key lives in `.env` (chmod 600), never in config. Daily
+pipeline:
 
 ```sh
 python main.py "question" --mode speed|balanced|quality [--confirm] [--out report.md]
@@ -185,8 +190,13 @@ llm:
   temperature: 0.2
 
 search:
-  backend: auto               # auto | metasearch | crawler | commercial
-  metasearch_url: ""          # self-hosted metasearch instance (keyless)
+  backend: scout              # scout | metasearch | crawler | commercial | auto
+  scout:                      # built-in keyless multi-source search (default)
+    trusted_outlets: []       # domains given a vetting quality boost
+    sources: {}               # per-source overrides, e.g. {startpage: false}
+    searxng_public: false     # off by default (volunteer public instances)
+    offline: false            # fixture-only mode (tests / smoke)
+  metasearch_url: ""          # self-hosted SearXNG/metasearch (extra breadth)
   commercial:
     endpoint: ""              # generic JSON search API
     api_key_env: RAVE_SEARCH_API_KEY
@@ -211,8 +221,12 @@ modes:                        # override budgets if you must
   quality:  {researcher_iters: 8, critic_cycles: 3, tool_call_ceiling: 150}
 ```
 
-Backend auto-selection: `metasearch_url` if set, else `commercial` if its key
-is present, else exit with a setup hint.
+Backend auto-selection (`backend: auto`): `metasearch_url` if set, else
+`commercial` if its key is present, else the keyless SCOUT backend. `scout` is
+the recommended default for new configs — no server, no Docker, no API key.
+SearXNG (`metasearch`) remains available as an optional breadth upgrade that
+adds Google + Bing reach; existing metasearch and crawler configs keep working
+unchanged.
 
 LLM protocol auto-detection: a `base_url` on `api.anthropic.com` speaks the
 Anthropic messages protocol; every other URL speaks OpenAI-compatible chat
