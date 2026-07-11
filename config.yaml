@@ -21,14 +21,17 @@ llm:
 
 search:
   # Backend selection:
-  #   "scout"      — built-in keyless multi-source search (recommended default;
-  #                  no server, no Docker, no API key);
-  #   "metasearch" — self-hosted metasearch instance URL;
+  #   "metasearch" — self-hosted SearXNG/metasearch instance [recommended]:
+  #                  Google + Bing reach and ~200 engines, with
+  #                  community-maintained engine adapters;
+  #   "scout"      — built-in keyless multi-source search (zero-install
+  #                  fallback; no server, no Docker, no API key);
   #   "commercial" — keyed JSON search API (key in the named env var);
   #   "crawler"    — local BM25 index over a user-supplied domain list.
-  # If backend is "auto": metasearch_url if set, else commercial if key present,
-  # else scout (always available).
-  backend: scout              # scout | metasearch | crawler | commercial | auto
+  # If backend is "auto": metasearch when a SearXNG answers (at metasearch_url,
+  # or at localhost:8080 when none is configured), else commercial if its key
+  # is present, else scout (always available).
+  backend: auto               # auto | metasearch | scout | crawler | commercial
   scout:
     trusted_outlets: []       # domains marked trusted (a vetting quality boost)
     sources: {}               # per-source overrides, e.g. {startpage: false}

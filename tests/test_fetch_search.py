@@ -106,29 +106,72 @@ def test_commercial_backend_parses_alternate_shapes():
     assert hits[0].url == "https://a.test/x" and hits[0].title == "A"
 
 
-def test_backend_auto_selection_and_scout_default(monkeypatch):
+def searxng_up_transport():
+    """Answers 200 on any /search — a reachable SearXNG-style JSON API."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/search":
+            return httpx.Response(200, json={"results": []})
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handler)
+
+
+def searxng_down_transport():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    return httpx.MockTransport(handler)
+
+
+def test_auto_prefers_reachable_searxng(monkeypatch):
+    from config import ScoutConfig
     from tools.search_scout import ScoutBackend
+    from tools.web_search import DEFAULT_SEARXNG_URL
 
-    fetcher = Fetcher(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+    fetcher = Fetcher(transport=searxng_down_transport())
 
-    # metasearch_url takes precedence
+    # configured metasearch_url + reachable → metasearch
     cfg = SearchConfig(backend="auto", metasearch_url="https://meta.test")
-    assert isinstance(make_backend(cfg, fetcher), MetasearchBackend)
+    be = make_backend(cfg, fetcher, transport=searxng_up_transport())
+    assert isinstance(be, MetasearchBackend)
+    assert be.base_url == "https://meta.test"
 
-    # then a commercial key
+    # nothing configured, but a SearXNG answers on localhost:8080 → metasearch
+    cfg = SearchConfig(backend="auto")
+    be = make_backend(cfg, fetcher, transport=searxng_up_transport())
+    assert isinstance(be, MetasearchBackend)
+    assert be.base_url == DEFAULT_SEARXNG_URL
+
+    # configured but unreachable → scout (the zero-install fallback)
+    cfg = SearchConfig(backend="auto", metasearch_url="https://meta.test",
+                       scout=ScoutConfig(offline=True))
+    be = make_backend(cfg, fetcher, transport=searxng_down_transport())
+    assert isinstance(be, ScoutBackend)
+
+    # unreachable + commercial key present → commercial wins over scout
     monkeypatch.setenv("RAVE_SEARCH_API_KEY", "k")
     cfg = SearchConfig(
         backend="auto",
         commercial=CommercialSearchConfig(endpoint="https://api.test/s"),
     )
-    assert isinstance(make_backend(cfg, fetcher), CommercialBackend)
+    be = make_backend(cfg, fetcher, transport=searxng_down_transport())
+    assert isinstance(be, CommercialBackend)
 
-    # with nothing configured, auto now falls back to the keyless SCOUT backend
+    # nothing anywhere → scout
     monkeypatch.delenv("RAVE_SEARCH_API_KEY", raising=False)
-    from config import ScoutConfig
-
     cfg = SearchConfig(backend="auto", scout=ScoutConfig(offline=True))
-    assert isinstance(make_backend(cfg, fetcher), ScoutBackend)
+    be = make_backend(cfg, fetcher, transport=searxng_down_transport())
+    assert isinstance(be, ScoutBackend)
+
+
+def test_explicitly_named_backends_are_never_probed():
+    # backend: metasearch with an unreachable URL must NOT silently fall back —
+    # the backend is constructed as configured (failures surface at query time).
+    cfg = SearchConfig(backend="metasearch", metasearch_url="https://meta.test")
+    fetcher = Fetcher(transport=searxng_down_transport())
+    be = make_backend(cfg, fetcher, transport=searxng_down_transport())
+    assert isinstance(be, MetasearchBackend)
 
 
 def test_explicit_broken_backend_raises_setup_hint():

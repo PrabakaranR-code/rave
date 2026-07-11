@@ -28,10 +28,13 @@ llm:
   temperature: 0.2
 
 search:
-  # scout      = built-in keyless multi-source search (recommended; no server)
-  # metasearch = self-hosted search engine URL (keyless)
+  # metasearch = self-hosted SearXNG/search server [recommended]:
+  #              community-maintained breadth (Google + Bing, ~200 engines)
+  # scout      = built-in keyless multi-source search (zero-install fallback)
   # crawler    = built-in web reader over the trusted domain list below
   # commercial = keyed JSON search API (key env var: RAVE_SEARCH_API_KEY)
+  # auto       = metasearch when a SearXNG answers (metasearch_url, else
+  #              localhost:8080), else scout
   backend: {search_backend}
   scout:
     trusted_outlets: {trusted_outlets}

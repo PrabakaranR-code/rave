@@ -34,10 +34,10 @@ The installer checks your computer, fetches what's missing, and hands over to
 the setup wizard. The wizard asks a few numbered questions — where RAVE's
 thinking should happen (a local AI model, an online service with an API key
 (your access key), or a provider bundle that also connects RAVE into that
-company's AI apps), how to search the web (built-in SCOUT by default, an
-optional private SearXNG server via Docker for extra breadth, or the crawler),
-runs a test question, and finishes. You never type model names, addresses, or
-paths — you only pick numbers.
+company's AI apps), how to search the web (a private SearXNG server via Docker
+[recommended], the built-in zero-install SCOUT, or the crawler), runs a test
+question, and finishes. You never type model names, addresses, or paths — you
+only pick numbers.
 
 Afterwards, daily use is just:
 
@@ -113,12 +113,14 @@ pip install -r requirements.txt
 #    then set config.yaml → llm.model to the model you pulled
 #    (hosted APIs work too: llm.mode: api + base_url + key; see docs/LIVE_RUN.md)
 
-# 2. a search backend — SCOUT is the default and needs nothing installed:
-#    * SCOUT (recommended, keyless, no server): search.backend: scout —
-#        built-in multi-source search across independent engines, science
-#        databases, Wikipedia, and news feeds. Nothing to set up.
-#    * SearXNG for extra Google/Bing breadth (self-hosted, needs Docker):
+# 2. a search backend — the default (backend: auto) picks the best available:
+#    * SearXNG (recommended; self-hosted via Docker): Google + Bing reach and
+#        ~200 engines with community-maintained adapters —
 #        search.backend: metasearch, search.metasearch_url: http://localhost:8080
+#        (auto finds a SearXNG running on localhost:8080 by itself)
+#    * SCOUT (built-in, keyless, zero install): search.backend: scout —
+#        multi-source search across independent engines, science databases,
+#        Wikipedia, and news feeds; the automatic fallback when no SearXNG runs
 #    * a commercial search API:
 #        search.backend: commercial + export RAVE_SEARCH_API_KEY=...
 #    * a local crawl of domains you name:
@@ -190,13 +192,13 @@ llm:
   temperature: 0.2
 
 search:
-  backend: scout              # scout | metasearch | crawler | commercial | auto
-  scout:                      # built-in keyless multi-source search (default)
+  backend: auto               # auto | metasearch | scout | crawler | commercial
+  scout:                      # built-in keyless search (zero-install fallback)
     trusted_outlets: []       # domains given a vetting quality boost
     sources: {}               # per-source overrides, e.g. {startpage: false}
     searxng_public: false     # off by default (volunteer public instances)
     offline: false            # fixture-only mode (tests / smoke)
-  metasearch_url: ""          # self-hosted SearXNG/metasearch (extra breadth)
+  metasearch_url: ""          # self-hosted SearXNG [recommended breadth]
   commercial:
     endpoint: ""              # generic JSON search API
     api_key_env: RAVE_SEARCH_API_KEY
@@ -221,12 +223,13 @@ modes:                        # override budgets if you must
   quality:  {researcher_iters: 8, critic_cycles: 3, tool_call_ceiling: 150}
 ```
 
-Backend auto-selection (`backend: auto`): `metasearch_url` if set, else
-`commercial` if its key is present, else the keyless SCOUT backend. `scout` is
-the recommended default for new configs — no server, no Docker, no API key.
-SearXNG (`metasearch`) remains available as an optional breadth upgrade that
-adds Google + Bing reach; existing metasearch and crawler configs keep working
-unchanged.
+Backend auto-selection (`backend: auto`): RAVE probes for a reachable SearXNG
+— at `metasearch_url` if set, else at `localhost:8080` — and uses it when it
+answers (recommended: community-maintained engine adapters and Google + Bing
+reach). Otherwise it uses `commercial` if its key is present, else the keyless
+built-in SCOUT backend — the zero-install fallback that always works.
+Explicitly named backends are never probed, so existing metasearch and crawler
+configs keep working unchanged.
 
 LLM protocol auto-detection: a `base_url` on `api.anthropic.com` speaks the
 Anthropic messages protocol; every other URL speaks OpenAI-compatible chat

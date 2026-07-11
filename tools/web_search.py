@@ -1,13 +1,16 @@
 """`web_search` tool: pluggable search backends + the embedded pipeline.
 
 Backends (one interface, chosen in config.yaml):
-  (a) scout      — built-in keyless multi-source search (default; see
-                   tools/search_scout.py). No server, no Docker, no API key;
-  (b) metasearch — a self-hosted metasearch instance URL (keyless, private);
+  (a) metasearch — a self-hosted SearXNG/metasearch instance (recommended:
+                   community-maintained engine adapters, Google + Bing reach);
+  (b) scout      — built-in keyless multi-source search (zero-install
+                   fallback; see tools/search_scout.py);
   (c) crawler    — own mini-crawler + local BM25 index over a user domain list;
   (d) commercial — a generic JSON search API adapter (key in an env var).
-Selection when backend is "auto": (b) if a URL is configured, else (d) if a
-key is present, else (a) scout — which needs no configuration at all.
+Selection when backend is "auto": (a) when a SearXNG answers — at the
+configured metasearch_url, or at localhost:8080 when none is configured —
+else (d) if a commercial key is present, else (b) scout, which needs no
+configuration at all. Explicitly named backends are never probed.
 
 Every search runs the embedded pipeline on the hits: fetch → extract → chunk
 → hybrid rank (BM25 + embedding cosine) → vet → top chunks with metadata.
@@ -198,6 +201,27 @@ def _links(html: str, base_url: str) -> list[str]:
     return out
 
 
+DEFAULT_SEARXNG_URL = "http://localhost:8080"
+
+
+def searxng_reachable(
+    base_url: str,
+    transport: httpx.BaseTransport | None = None,
+    timeout: float = 1.5,
+) -> bool:
+    """True when a SearXNG-style JSON search API answers at base_url."""
+    try:
+        with httpx.Client(transport=transport, timeout=timeout,
+                          follow_redirects=True) as client:
+            resp = client.get(
+                f"{base_url.rstrip('/')}/search",
+                params={"q": "ping", "format": "json"},
+            )
+        return resp.status_code == 200
+    except Exception:  # noqa: BLE001 — unreachable means "not there"
+        return False
+
+
 def make_backend(
     cfg: SearchConfig,
     fetcher: Fetcher,
@@ -205,12 +229,15 @@ def make_backend(
 ):
     kind = cfg.backend
     if kind == "auto":
-        if cfg.metasearch_url:
-            kind = "metasearch"
-        elif cfg.commercial.endpoint and cfg.commercial.api_key:
+        # A reachable SearXNG wins (recommended: community-maintained breadth);
+        # probe the configured URL, or localhost:8080 when none is configured.
+        probe_url = cfg.metasearch_url or DEFAULT_SEARXNG_URL
+        if searxng_reachable(probe_url, transport):
+            return MetasearchBackend(probe_url, transport=transport)
+        if cfg.commercial.endpoint and cfg.commercial.api_key:
             kind = "commercial"
         else:
-            kind = "scout"  # built-in, keyless — always available
+            kind = "scout"  # built-in, keyless — the zero-install fallback
     if kind == "scout":
         from tools.search_scout import ScoutBackend  # lazy: avoids import cycle
 
