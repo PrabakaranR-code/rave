@@ -436,9 +436,14 @@ def ensure_docker(fx: Effects, scan: SystemScan) -> bool:
 
 
 def flow_web(fx: Effects, scan: SystemScan, repo: Path, choices: ConfigChoices) -> None:
-    """Step 3 — web reach: SCOUT (built in) / SearXNG (Docker) / crawler."""
+    """Step 3 — web reach: SearXNG (Docker) [recommended] / SCOUT / crawler.
+
+    Docker stays out of the installer essentials: picking [1] is what triggers
+    the Docker install/start path, and its two-failure escape hatch falls back
+    to SCOUT (the zero-install built-in), never the crawler.
+    """
     pick = menu(fx, screen("web_choice"), 3)
-    if pick == 2:
+    if pick == 1:
         _flow_searxng(fx, scan, repo, choices)
     elif pick == 3:
         raw = ask_text(fx, screen("web_crawler"))

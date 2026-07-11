@@ -63,10 +63,30 @@ llm:
 
 ## 2. Provide a search backend
 
-Pick one option and set it under `search:` in `config.yaml`. The default,
-SCOUT, needs nothing installed.
+Pick one option and set it under `search:` in `config.yaml` — or leave the
+default `backend: auto`, which uses SearXNG when one answers (at
+`metasearch_url`, or at `localhost:8080` when none is configured) and falls
+back to the built-in SCOUT otherwise. Explicitly named backends are never
+probed.
 
-### Option A — SCOUT (built-in, keyless; recommended default)
+### Option A — SearXNG (self-hosted via Docker; recommended)
+
+Google + Bing reach and ~200 engines, with community-maintained engine
+adapters: when search sites change their markup, volunteers fix the adapters
+within days — you just pull the updated image.
+
+```yaml
+search:
+  backend: metasearch
+  metasearch_url: http://localhost:8080   # must serve /search?q=...&format=json
+```
+
+Any metasearch engine exposing that JSON endpoint works (for SearXNG, enable
+the JSON API once: in `settings.yml` set `search: { formats: [html, json] }`
+and restart). The wizard's SearXNG option installs Docker and starts this for
+you.
+
+### Option B — SCOUT (built-in, keyless; the zero-install fallback)
 
 ```yaml
 search:
@@ -79,24 +99,9 @@ search:
 
 SCOUT queries independent search engines, science databases (arXiv, PubMed),
 Wikipedia, and news feeds in parallel, directly from your machine — no server,
-no Docker, no API key. It deliberately skips Google/Bing (ad- and SEO-driven).
-This is what `rave setup` picks by default.
-
-### Option B — SearXNG for extra breadth (self-hosted, needs Docker)
-
-Adds Google + Bing reach on top of SCOUT's sources, at the cost of running a
-container.
-
-```yaml
-search:
-  backend: metasearch
-  metasearch_url: http://localhost:8080   # must serve /search?q=...&format=json
-```
-
-Any metasearch engine exposing that JSON endpoint works (for SearXNG, enable
-the JSON API once: in `settings.yml` set `search: { formats: [html, json] }`
-and restart). The wizard's SearXNG option installs Docker and starts this for
-you.
+no Docker, no API key. It deliberately skips Google/Bing (ad- and SEO-driven)
+and is maintained inside this project. It is also what `auto` falls back to
+when no SearXNG is running.
 
 ### Option C — commercial JSON search API
 
@@ -133,9 +138,10 @@ git clone <this-repo> && cd rave
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Minimal setup (local LLM + built-in SCOUT search — nothing else to install):
+# Minimal setup (local LLM; nothing else to install):
 #   install Ollama, then:  ollama pull llama3.1:8b
-#   search.backend: scout is the default; no server or key needed
+#   search.backend: auto is the default — it uses your SearXNG if one is
+#   running (recommended), else the built-in SCOUT; no server or key needed
 
 python main.py "What are the health benefits of intermittent fasting?" \
   --mode balanced --out report.md

@@ -115,14 +115,14 @@ SCREENS: dict[str, str] = {
     "public_url": "Your RAVE URL (the internet address of your RAVE): {url}",
     "web_choice": (
         "How should RAVE search the web?\n"
-        " [1] SCOUT (built in) [recommended] — works instantly, nothing to"
-        " install; searches independent engines, science databases, Wikipedia"
-        " and your trusted news feeds directly — skipping Google/Bing, whose"
-        " results are driven by ads and SEO (pages engineered to please"
-        " rankings, not you)\n"
-        " [2] SearXNG (your private search server) via Docker (a helper"
-        " program) — adds Google + Bing breadth, more setup, a program always"
-        " running\n"
+        " [1] SearXNG (your private search server) via Docker (a helper"
+        " program) [recommended] — adds Google + Bing reach and ~200 engines,"
+        " and its engine adapters are community-maintained: when search sites"
+        " change, volunteers fix it within days — you just update\n"
+        " [2] SCOUT (built in) — works instantly, nothing to install; searches"
+        " independent engines, science databases, Wikipedia and your trusted"
+        " news feeds directly — skipping Google/Bing's ad- and SEO-driven"
+        " (rankings-chasing) results. Maintained inside this project\n"
         " [3] Crawler (built in) — searches only websites you list, for special"
         " cases"
     ),
