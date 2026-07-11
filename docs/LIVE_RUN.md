@@ -63,9 +63,29 @@ llm:
 
 ## 2. Provide a search backend
 
-Pick one option and set it under `search:` in `config.yaml`.
+Pick one option and set it under `search:` in `config.yaml`. The default,
+SCOUT, needs nothing installed.
 
-### Option A — self-hosted metasearch instance (keyless; recommended)
+### Option A — SCOUT (built-in, keyless; recommended default)
+
+```yaml
+search:
+  backend: scout
+  scout:
+    trusted_outlets: []       # optional: domains given a vetting quality boost
+    sources: {}               # optional per-source overrides, e.g. {startpage: false}
+    searxng_public: false     # leave off unless you want volunteer public instances
+```
+
+SCOUT queries independent search engines, science databases (arXiv, PubMed),
+Wikipedia, and news feeds in parallel, directly from your machine — no server,
+no Docker, no API key. It deliberately skips Google/Bing (ad- and SEO-driven).
+This is what `rave setup` picks by default.
+
+### Option B — SearXNG for extra breadth (self-hosted, needs Docker)
+
+Adds Google + Bing reach on top of SCOUT's sources, at the cost of running a
+container.
 
 ```yaml
 search:
@@ -75,9 +95,10 @@ search:
 
 Any metasearch engine exposing that JSON endpoint works (for SearXNG, enable
 the JSON API once: in `settings.yml` set `search: { formats: [html, json] }`
-and restart).
+and restart). The wizard's SearXNG option installs Docker and starts this for
+you.
 
-### Option B — commercial JSON search API
+### Option C — commercial JSON search API
 
 ```yaml
 search:
@@ -93,7 +114,7 @@ The adapter sends `GET <endpoint>?q=<query>&count=<n>` with the key in both
 `snippet|description` fields. APIs with a different shape need a small tweak
 in `tools/web_search.py` (`CommercialBackend`).
 
-### Option C — no search service: crawl domains you trust
+### Option D — crawl only domains you trust
 
 ```yaml
 search:
@@ -112,9 +133,9 @@ git clone <this-repo> && cd rave
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Option A prerequisites, as an example:
+# Minimal setup (local LLM + built-in SCOUT search — nothing else to install):
 #   install Ollama, then:  ollama pull llama3.1:8b
-#   run a metasearch container on localhost:8080 with the JSON API enabled
+#   search.backend: scout is the default; no server or key needed
 
 python main.py "What are the health benefits of intermittent fasting?" \
   --mode balanced --out report.md
@@ -139,7 +160,7 @@ before the swarm starts.
 |------|---------|-----|
 | 0 | success | — |
 | 2 | HALT: no working web access | check network / search backend URL |
-| 3 | no search backend configured | set one of the `search:` options above |
+| 3 | search backend misconfigured (e.g. `metasearch` with no URL) | set one of the `search:` options above, or use `backend: scout` |
 | 4 | LLM failure (unreachable, or schema-invalid tool calls after retries) | check endpoint/key; use a stronger model |
 | 5 | budget stop outside a recoverable phase | rerun, or raise the mode ceiling |
 

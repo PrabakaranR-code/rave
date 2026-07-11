@@ -1,11 +1,13 @@
 """`web_search` tool: pluggable search backends + the embedded pipeline.
 
 Backends (one interface, chosen in config.yaml):
-  (a) metasearch — a self-hosted metasearch instance URL (keyless, private);
-  (b) crawler   — own mini-crawler + local BM25 index over a user domain list;
-  (c) commercial — a generic JSON search API adapter (key in an env var).
-Selection when backend is "auto": (a) if a URL is configured, else (c) if a
-key is present, else fail with a setup hint.
+  (a) scout      — built-in keyless multi-source search (default; see
+                   tools/search_scout.py). No server, no Docker, no API key;
+  (b) metasearch — a self-hosted metasearch instance URL (keyless, private);
+  (c) crawler    — own mini-crawler + local BM25 index over a user domain list;
+  (d) commercial — a generic JSON search API adapter (key in an env var).
+Selection when backend is "auto": (b) if a URL is configured, else (d) if a
+key is present, else (a) scout — which needs no configuration at all.
 
 Every search runs the embedded pipeline on the hits: fetch → extract → chunk
 → hybrid rank (BM25 + embedding cosine) → vet → top chunks with metadata.
@@ -34,7 +36,8 @@ class SearchSetupError(Exception):
 
 
 SETUP_HINT = (
-    "No search backend configured. Set one of:\n"
+    "Search backend misconfigured. Set one of:\n"
+    "  * search.backend: scout — built-in, keyless, no setup (recommended), or\n"
     "  * search.metasearch_url in config.yaml (self-hosted metasearch, keyless), or\n"
     "  * search.commercial.endpoint + an API key in the env var named by\n"
     "    search.commercial.api_key_env, or\n"
@@ -47,6 +50,11 @@ class SearchHit:
     url: str
     title: str = ""
     snippet: str = ""
+    # SCOUT-provided metadata; other backends leave these at their defaults.
+    trusted: bool = False
+    source: str = ""
+    category: str = ""
+    published: str = ""
 
 
 class MetasearchBackend:
@@ -202,7 +210,11 @@ def make_backend(
         elif cfg.commercial.endpoint and cfg.commercial.api_key:
             kind = "commercial"
         else:
-            raise SearchSetupError(SETUP_HINT)
+            kind = "scout"  # built-in, keyless — always available
+    if kind == "scout":
+        from tools.search_scout import ScoutBackend  # lazy: avoids import cycle
+
+        return ScoutBackend.from_config(cfg.scout)
     if kind == "metasearch":
         if not cfg.metasearch_url:
             raise SearchSetupError(SETUP_HINT)
@@ -246,6 +258,7 @@ class WebSearchTool:
                 url=page.final_url, title=ex.title or hit.title, text=ex.text,
                 date_str=ex.date, topic_kind=self.topic_kind,
                 stale_months=self.cfg.stale_months,
+                trusted=hit.trusted,
             )
             if verdict.drop:
                 continue
@@ -256,6 +269,7 @@ class WebSearchTool:
                     "date": ex.date,
                     "source_type": verdict.source_type.value,
                     "stale": verdict.stale,
+                    "trusted": hit.trusted,
                     "vet_weight": verdict.weight,
                     "text": ch.text,
                 })

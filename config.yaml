@@ -20,11 +20,20 @@ llm:
   temperature: 0.2
 
 search:
-  # Backend selection: "metasearch" needs metasearch_url; "commercial" needs an
-  # API key in the named env var; "crawler" indexes a user-supplied domain list.
+  # Backend selection:
+  #   "scout"      — built-in keyless multi-source search (recommended default;
+  #                  no server, no Docker, no API key);
+  #   "metasearch" — self-hosted metasearch instance URL;
+  #   "commercial" — keyed JSON search API (key in the named env var);
+  #   "crawler"    — local BM25 index over a user-supplied domain list.
   # If backend is "auto": metasearch_url if set, else commercial if key present,
-  # else exit with a setup hint.
-  backend: auto               # auto | metasearch | crawler | commercial
+  # else scout (always available).
+  backend: scout              # scout | metasearch | crawler | commercial | auto
+  scout:
+    trusted_outlets: []       # domains marked trusted (a vetting quality boost)
+    sources: {}               # per-source overrides, e.g. {startpage: false}
+    searxng_public: false     # off by default; volunteer public SearXNG instances
+    offline: false            # fixture-only mode (tests / smoke checks)
   metasearch_url: ""          # e.g. http://localhost:8080 (self-hosted, keyless)
   commercial:
     endpoint: ""              # JSON search API endpoint

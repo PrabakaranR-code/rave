@@ -28,10 +28,16 @@ llm:
   temperature: 0.2
 
 search:
+  # scout      = built-in keyless multi-source search (recommended; no server)
   # metasearch = self-hosted search engine URL (keyless)
   # crawler    = built-in web reader over the trusted domain list below
   # commercial = keyed JSON search API (key env var: RAVE_SEARCH_API_KEY)
   backend: {search_backend}
+  scout:
+    trusted_outlets: {trusted_outlets}
+    sources: {{}}
+    searxng_public: false
+    offline: false
   metasearch_url: "{metasearch_url}"
   commercial:
     endpoint: "{commercial_endpoint}"
@@ -64,10 +70,11 @@ class ConfigChoices:
     base_url: str = ""                     # blank in local mode = localhost default
     model: str = "llama3.1:8b"
     api_key_env: str = "RAVE_LLM_API_KEY"
-    search_backend: str = "crawler"        # metasearch | crawler | commercial
+    search_backend: str = "scout"          # scout | metasearch | crawler | commercial
     metasearch_url: str = ""
     commercial_endpoint: str = ""
     crawler_domains: list[str] = field(default_factory=list)
+    trusted_outlets: list[str] = field(default_factory=list)
 
 
 def render_config(choices: ConfigChoices) -> str:
@@ -80,6 +87,7 @@ def render_config(choices: ConfigChoices) -> str:
         metasearch_url=choices.metasearch_url,
         commercial_endpoint=choices.commercial_endpoint,
         crawler_domains="[" + ", ".join(choices.crawler_domains) + "]",
+        trusted_outlets="[" + ", ".join(choices.trusted_outlets) + "]",
     )
 
 

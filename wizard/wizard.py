@@ -409,6 +409,9 @@ def _docker_ready(fx: Effects) -> bool:
 
 
 def ensure_docker(fx: Effects, scan: SystemScan) -> bool:
+    """Detect Docker; install/prompt for it only when the user has chosen the
+    SearXNG path. The two-failure escape hatch returns False so the caller
+    falls back to SCOUT."""
     if scan.docker or _docker_ready(fx):
         return True
     say(fx, screen("docker_missing"))
@@ -433,6 +436,28 @@ def ensure_docker(fx: Effects, scan: SystemScan) -> bool:
 
 
 def flow_web(fx: Effects, scan: SystemScan, repo: Path, choices: ConfigChoices) -> None:
+    """Step 3 — web reach: SCOUT (built in) / SearXNG (Docker) / crawler."""
+    pick = menu(fx, screen("web_choice"), 3)
+    if pick == 2:
+        _flow_searxng(fx, scan, repo, choices)
+    elif pick == 3:
+        raw = ask_text(fx, screen("web_crawler"))
+        choices.search_backend = "crawler"
+        choices.crawler_domains = websetup.parse_trusted_domains(raw)
+    else:
+        _flow_scout(fx, choices)
+
+
+def _flow_scout(fx: Effects, choices: ConfigChoices) -> None:
+    say(fx, screen("scout_chosen"))
+    choices.search_backend = "scout"
+    raw = ask_text(fx, screen("scout_outlets"))
+    if raw.strip():
+        choices.trusted_outlets = websetup.parse_outlets(raw)
+
+
+def _flow_searxng(fx: Effects, scan: SystemScan, repo: Path,
+                  choices: ConfigChoices) -> None:
     if ensure_docker(fx, scan):
         say(fx, screen("web_docker"))
         url = websetup.start_searxng(repo, fx.run, fx.http_get, fx.sleep)
@@ -441,11 +466,11 @@ def flow_web(fx: Effects, scan: SystemScan, repo: Path, choices: ConfigChoices) 
             choices.search_backend = "metasearch"
             choices.metasearch_url = url
             return
-        say(fx, "• The search engine didn't start — falling back to the"
-                " built-in crawler (a simpler web reader).")
-    raw = ask_text(fx, screen("web_crawler"))
-    choices.search_backend = "crawler"
-    choices.crawler_domains = websetup.parse_trusted_domains(raw)
+        say(fx, "• The search engine didn't start — switching to SCOUT"
+                " (the built-in search).")
+    else:
+        say(fx, "• Switching to SCOUT (the built-in search — works instantly).")
+    _flow_scout(fx, choices)
 
 
 # ---------------------------------------------------------------------------
@@ -470,13 +495,15 @@ def expert_setup(fx: Effects, args: argparse.Namespace, repo: Path,
         if choices.llm_mode == "api" and not choices.base_url:
             say(fx, "--mode api needs --provider or --base-url")
             return 2
-        choices.search_backend = args.search or "crawler"
+        choices.search_backend = args.search or "scout"
         if choices.search_backend == "metasearch":
             choices.metasearch_url = args.metasearch_url or websetup.searxng_url()
         elif choices.search_backend == "crawler":
             choices.crawler_domains = (
                 websetup.parse_trusted_domains(args.domains or "")
             )
+        elif choices.search_backend == "scout" and args.domains:
+            choices.trusted_outlets = websetup.parse_outlets(args.domains)
         write_config(config_path, choices)
         say(fx, f"✓ wrote {config_path} (mode={choices.llm_mode},"
                 f" model={choices.model}, search={choices.search_backend})")
@@ -503,7 +530,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provider", choices=[pr.key for pr in PROVIDERS])
     p.add_argument("--model")
     p.add_argument("--base-url", dest="base_url")
-    p.add_argument("--search", choices=["metasearch", "crawler", "commercial"])
+    p.add_argument("--search",
+                   choices=["scout", "metasearch", "crawler", "commercial"])
     p.add_argument("--metasearch-url", dest="metasearch_url")
     p.add_argument("--domains", help="comma/space separated trusted domains")
     return p

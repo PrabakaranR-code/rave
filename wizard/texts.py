@@ -13,6 +13,8 @@ JARGON = [
     "Docker",
     "MCP",
     "SearXNG",
+    "SCOUT",
+    "SEO",
     "base_url",
     "Ollama",
     "tunnel",
@@ -111,6 +113,26 @@ SCREENS: dict[str, str] = {
         " with cloudflared (the tunnel helper program)…"
     ),
     "public_url": "Your RAVE URL (the internet address of your RAVE): {url}",
+    "web_choice": (
+        "How should RAVE search the web?\n"
+        " [1] SCOUT (built in) [recommended] — works instantly, nothing to"
+        " install; searches independent engines, science databases, Wikipedia"
+        " and your trusted news feeds directly — skipping Google/Bing, whose"
+        " results are driven by ads and SEO (pages engineered to please"
+        " rankings, not you)\n"
+        " [2] SearXNG (your private search server) via Docker (a helper"
+        " program) — adds Google + Bing breadth, more setup, a program always"
+        " running\n"
+        " [3] Crawler (built in) — searches only websites you list, for special"
+        " cases"
+    ),
+    "scout_chosen": (
+        "✓ Using SCOUT (built-in search). Nothing to install."
+    ),
+    "scout_outlets": (
+        "Optional: type news outlets you trust, separated by spaces (their"
+        " results get a small boost). Press Enter to keep good defaults."
+    ),
     "web_docker": "Starting SearXNG (your private search engine)… ",
     "web_docker_ok": "✓ SearXNG (your private search engine) is working.",
     "docker_missing": (
@@ -119,8 +141,8 @@ SCREENS: dict[str, str] = {
     ),
     "docker_retry": (
         " [1] Try again\n"
-        " [2] Continue with RAVE's built-in crawler (a simpler web reader —"
-        " finds less)"
+        " [2] Switch to SCOUT (the built-in search — works instantly, nothing"
+        " to install)"
     ),
     "web_crawler": (
         "Using the built-in crawler (a simpler web reader). Type websites you"
@@ -148,9 +170,9 @@ SCREENS: dict[str, str] = {
         "Fields: mode local|api · base_url (blank in local mode ="
         " http://localhost:11434/v1) · model · api_key_env (env var NAME; the"
         " key itself lives in .env) · search backend"
-        " metasearch|crawler|commercial.\n"
+        " scout|metasearch|crawler|commercial (scout is the default).\n"
         "Non-interactive example: rave setup --expert --mode api --provider"
-        " anthropic --model claude-sonnet-4-6 --search metasearch"
+        " anthropic --model claude-sonnet-4-6 --search scout"
     ),
 }
 

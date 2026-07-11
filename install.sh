@@ -95,11 +95,9 @@ while ! have git; do
 done
 say "✓ Git found"
 
-# --- Docker (a helper program for the search engine) — optional here --------
-if ! have docker && [ "$OS" = "ubuntu" ] && [ "${RAVE_SKIP_DOCKER:-0}" != "1" ]; then
-  say "→ Installing Docker (a helper program for the search engine)…"
-  $APT install -y docker.io >/dev/null 2>&1 || true
-fi
+# Docker is NOT installed here: the default search backend is SCOUT (built in,
+# keyless, no server). Docker is only needed if you later pick the optional
+# SearXNG backend in the wizard, which installs it then.
 
 # --- Get the code, build the sandbox, install dependencies ------------------
 if [ -d "$DIR/.git" ]; then

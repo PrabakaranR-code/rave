@@ -106,21 +106,38 @@ def test_commercial_backend_parses_alternate_shapes():
     assert hits[0].url == "https://a.test/x" and hits[0].title == "A"
 
 
-def test_backend_auto_selection_and_setup_hint(monkeypatch):
-    fetcher = Fetcher(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
-    with pytest.raises(SearchSetupError) as ei:
-        make_backend(SearchConfig(backend="auto"), fetcher)
-    assert "metasearch_url" in str(ei.value)
+def test_backend_auto_selection_and_scout_default(monkeypatch):
+    from tools.search_scout import ScoutBackend
 
+    fetcher = Fetcher(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+
+    # metasearch_url takes precedence
     cfg = SearchConfig(backend="auto", metasearch_url="https://meta.test")
     assert isinstance(make_backend(cfg, fetcher), MetasearchBackend)
 
+    # then a commercial key
     monkeypatch.setenv("RAVE_SEARCH_API_KEY", "k")
     cfg = SearchConfig(
         backend="auto",
         commercial=CommercialSearchConfig(endpoint="https://api.test/s"),
     )
     assert isinstance(make_backend(cfg, fetcher), CommercialBackend)
+
+    # with nothing configured, auto now falls back to the keyless SCOUT backend
+    monkeypatch.delenv("RAVE_SEARCH_API_KEY", raising=False)
+    from config import ScoutConfig
+
+    cfg = SearchConfig(backend="auto", scout=ScoutConfig(offline=True))
+    assert isinstance(make_backend(cfg, fetcher), ScoutBackend)
+
+
+def test_explicit_broken_backend_raises_setup_hint():
+    fetcher = Fetcher(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+    # backend named but its requirement missing → loud setup hint
+    with pytest.raises(SearchSetupError):
+        make_backend(SearchConfig(backend="metasearch"), fetcher)
+    with pytest.raises(SearchSetupError):
+        make_backend(SearchConfig(backend="commercial"), fetcher)
 
 
 def test_web_search_tool_end_to_end_pipeline():

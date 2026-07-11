@@ -244,31 +244,64 @@ def test_welcome_letter_e_jumps_to_expert(tmp_path):
 
 # --- full wizard end-to-end (local brain, crawler fallback, smoke test) -------
 
-def test_full_wizard_local_crawler_smoke(tmp_path):
+def test_full_wizard_local_scout_smoke(tmp_path):
     repo = tmp_path / "repo"
     home = tmp_path / "home"
     repo.mkdir(), home.mkdir()
     record: dict = {}
     fx, printed, opened, _ = make_fx(
-        # welcome → local brain → first model → Docker enter-check →
-        # fall back to crawler → default domains → sample smoke question
-        inputs=["1", "1", "1", "", "2", "", ""],
+        # welcome → local brain → first model → web_choice SCOUT (1) →
+        # trusted-outlets (Enter keeps defaults) → sample smoke question
+        inputs=["1", "1", "1", "1", "", ""],
     )
     rc = run_setup([], fx=fx, scan=scan_fixture(), repo=repo, home=home,
                    orchestrator_factory=fake_factory(record))
     assert rc == 0
     cfg = load_config(repo / "config.yaml")
     assert cfg.llm.mode == "local" and cfg.llm.model == "llama3.1:8b"
-    assert cfg.search.backend == "crawler"
-    assert cfg.search.crawler.domains == websetup.DEFAULT_TRUSTED
+    assert cfg.search.backend == "scout"          # recommended default path
+    assert cfg.search.scout.trusted_outlets == []  # Enter kept defaults
     joined = "\n".join(printed)
     assert "Checking this computer…" in joined
-    assert "Docker (a helper program for the search engine)" in joined
+    assert "SCOUT (built in)" in joined
     assert "✓ Done — your report is saved and now opening." in joined
     assert "RAVE is ready." in joined
     assert record["mode"] == "speed"  # smoke test runs in speed mode
     assert (home / "Documents" / "RAVE").exists()
     assert any(u.startswith("file://") for u in opened)  # report opened
+
+
+def test_wizard_crawler_path(tmp_path):
+    repo = tmp_path / "repo"
+    home = tmp_path / "home"
+    repo.mkdir(), home.mkdir()
+    record: dict = {}
+    fx, printed, _, _ = make_fx(
+        # welcome, local, model, web_choice Crawler (3), domains Enter, smoke
+        inputs=["1", "1", "1", "3", "", ""],
+    )
+    rc = run_setup([], fx=fx, scan=scan_fixture(), repo=repo, home=home,
+                   orchestrator_factory=fake_factory(record))
+    assert rc == 0
+    cfg = load_config(repo / "config.yaml")
+    assert cfg.search.backend == "crawler"
+    assert cfg.search.crawler.domains == websetup.DEFAULT_TRUSTED
+
+
+def test_wizard_scout_custom_outlets(tmp_path):
+    repo = tmp_path / "repo"
+    home = tmp_path / "home"
+    repo.mkdir(), home.mkdir()
+    record: dict = {}
+    fx, _, _, _ = make_fx(
+        inputs=["1", "1", "1", "1", "reuters.com apnews.com", ""],
+    )
+    rc = run_setup([], fx=fx, scan=scan_fixture(), repo=repo, home=home,
+                   orchestrator_factory=fake_factory(record))
+    assert rc == 0
+    cfg = load_config(repo / "config.yaml")
+    assert cfg.search.backend == "scout"
+    assert cfg.search.scout.trusted_outlets == ["reuters.com", "apnews.com"]
 
 
 def test_wizard_docker_path_starts_searxng(tmp_path):
@@ -280,7 +313,8 @@ def test_wizard_docker_path_starts_searxng(tmp_path):
     )
     record: dict = {}
     fx, printed, _, ran = make_fx(
-        inputs=["1", "1", "1", ""],  # welcome, local, model, smoke Enter
+        # welcome, local, model, web_choice SearXNG (2), smoke Enter
+        inputs=["1", "1", "1", "2", ""],
         run_map={("docker",): (0, "ok")},
         transport=searx,
     )
@@ -291,7 +325,29 @@ def test_wizard_docker_path_starts_searxng(tmp_path):
     assert cfg.search.backend == "metasearch"
     assert cfg.search.metasearch_url == "http://localhost:8080"
     assert any(c[:2] == ["docker", "run"] for c in ran)
-    assert "✓ SearXNG (your private search engine) is working." in printed
+
+
+def test_wizard_searxng_docker_missing_falls_back_to_scout(tmp_path):
+    repo = tmp_path / "repo"
+    home = tmp_path / "home"
+    repo.mkdir(), home.mkdir()
+    record: dict = {}
+    # scan reports no docker; not headless → 2 enter-loops fail, then the
+    # docker_retry menu pick 2 switches to SCOUT. Inputs: welcome, local,
+    # model, web_choice SearXNG (2), docker enter-check (""), retry menu "2",
+    # scout outlets Enter, smoke Enter.
+    fx, printed, _, _ = make_fx(
+        inputs=["1", "1", "1", "2", "", "2", "", ""],
+        run_map={("docker", "info"): (1, "not running")},
+    )
+    rc = run_setup([], fx=fx, scan=scan_fixture(docker=False), repo=repo,
+                   home=home, orchestrator_factory=fake_factory(record))
+    assert rc == 0
+    cfg = load_config(repo / "config.yaml")
+    assert cfg.search.backend == "scout"  # fell back from the failed SearXNG path
+    joined = "\n".join(printed)
+    assert "Docker (a helper program for the search engine)" in joined
+    assert "SCOUT" in joined
 
 
 # --- web setup unit ------------------------------------------------------------

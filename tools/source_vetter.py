@@ -87,6 +87,9 @@ class VetVerdict:
     reasons: list[str]
 
 
+TRUSTED_BOOST = 1.15  # multiplier for sources on the user's trusted-outlet list
+
+
 def vet(
     url: str,
     title: str = "",
@@ -95,11 +98,16 @@ def vet(
     topic_kind: TopicKind = TopicKind.fast_moving,
     stale_months: int = 6,
     today: _dt.date | None = None,
+    trusted: bool = False,
 ) -> VetVerdict:
     stype = classify_source(url, title, text)
     weight = TYPE_WEIGHT[stype]
     reasons: list[str] = [f"type:{stype.value}"]
     drop = False
+
+    if trusted:
+        weight *= TRUSTED_BOOST
+        reasons.append("boost:trusted_outlet")
 
     farm = seo_farm_score(title, text)
     if farm >= 0.9:
